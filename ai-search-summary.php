@@ -11,7 +11,7 @@ declare(strict_types=1);
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
  * Requires at least: 6.9
  * Requires PHP: 8.4
- * Text Domain: ai-search-summary
+ * Text Domain: aiss-ai-search-summary
  * Domain Path: /languages
  */
 
@@ -1163,36 +1163,36 @@ class AI_Search_Summary {
             ) );
         }
 
-        // Delete all log entries matching spam queries
-        $placeholders = implode( ', ', array_fill( 0, count( $spam_queries ), '%s' ) );
-        $args         = array_merge( array( $table_name ), $spam_queries );
-
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-        $deleted = $wpdb->query(
-            // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
-            $wpdb->prepare(
-                "DELETE FROM %i WHERE search_query IN ($placeholders)",
-                ...$args
-            )
-        );
-
-        // Also clean up matching feedback entries
+        // Delete matching entries one query at a time to keep prepare() fully static
+        $deleted        = 0;
         $feedback_table = self::get_feedback_table_name();
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-        $wpdb->query(
-            // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
-            $wpdb->prepare(
-                "DELETE FROM %i WHERE search_query IN ($placeholders)",
-                ...array_merge( array( $feedback_table ), $spam_queries )
-            )
-        );
+
+        foreach ( $spam_queries as $spam_q ) {
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+            $rows = $wpdb->query(
+                $wpdb->prepare(
+                    'DELETE FROM %i WHERE search_query = %s',
+                    $table_name,
+                    $spam_q
+                )
+            );
+            if ( is_int( $rows ) ) {
+                $deleted += $rows;
+            }
+
+            // Also clean up matching feedback entries
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+            $wpdb->query(
+                $wpdb->prepare(
+                    'DELETE FROM %i WHERE search_query = %s',
+                    $feedback_table,
+                    $spam_q
+                )
+            );
+        }
 
         // Clear the analytics cache so stats refresh
         delete_transient( 'aiss_analytics_overview' );
-
-        if ( false === $deleted ) {
-            wp_send_json_error( array( 'message' => 'Database error while purging spam.' ) );
-        }
 
         wp_send_json_success( array(
             'message' => number_format( $deleted ) . ' spam log entries deleted across ' . count( $spam_queries ) . ' spam queries.',
