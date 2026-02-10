@@ -3,7 +3,7 @@ declare(strict_types=1);
 /**
  * Plugin Name: AI Search Summary
  * Description: Add an OpenAI powered AI summary to WordPress search results without delaying normal results, with analytics, cache control, and collapsible sources.
- * Version: 1.0.2
+ * Version: 1.0.3
  * Author: Jose Castillo
  * Author URI: https://github.com/RivianTrackr/
  * License: GPL v2 or later
@@ -14,7 +14,7 @@ declare(strict_types=1);
  * Domain Path: /languages
  */
 
-define( 'AI_SEARCH_VERSION', '1.0.2' );
+define( 'AI_SEARCH_VERSION', '1.0.3' );
 define( 'AISS_MODELS_CACHE_TTL', 7 * DAY_IN_SECONDS );
 define( 'AISS_MIN_CACHE_TTL', 60 );
 define( 'AISS_MAX_CACHE_TTL', 86400 );
@@ -3230,6 +3230,9 @@ class AI_Search_Summary {
                         foreach ( $options as $key => $value ) {
                             if ( $key !== 'auto_purge_enabled' && $key !== 'auto_purge_days' ) {
                                 if ( is_array( $value ) ) {
+                                    foreach ( $value as $item ) {
+                                        echo '<input type="hidden" name="' . esc_attr( $this->option_name ) . '[' . esc_attr( $key ) . '][]" value="' . esc_attr( $item ) . '" />';
+                                    }
                                     continue;
                                 }
                                 echo '<input type="hidden" name="' . esc_attr( $this->option_name ) . '[' . esc_attr( $key ) . ']" value="' . esc_attr( $value ) . '" />';

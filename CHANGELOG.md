@@ -5,7 +5,7 @@ All notable changes to AI Search Summary will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.2] - 2026-02-10
+## [1.0.3] - 2026-02-10
 
 ### Fixed
 
@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cache: Corrupted transients cleaned up** - If a cached transient contains invalid JSON, it is now deleted immediately rather than failing on every subsequent request until expiry.
 - **Rate Limiting: retry_after header clamped** - The `Retry-After` value in 429 responses is now guaranteed to be at least 1 second, preventing invalid zero or negative values.
 - **Rate Limiting: Session cache logging decoupled** - The `/log-session-hit` endpoint now uses a lightweight permission check (bot detection only) so browser cache hit logging no longer counts against the per-IP rate limit.
+- **Settings: Auto-purge form preserves post types** - Saving the automatic purging settings no longer clears selected post types (array-valued options were dropped by the hidden-field loop).
 
 ### Changed
 

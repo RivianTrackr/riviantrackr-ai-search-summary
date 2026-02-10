@@ -4,7 +4,7 @@ Tags: search, ai, openai, summary, chatgpt
 Requires at least: 6.9
 Tested up to: 6.9
 Requires PHP: 8.4
-Stable tag: 1.0.2
+Stable tag: 1.0.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -164,7 +164,7 @@ The plugin is designed with privacy in mind:
 
 == Changelog ==
 
-= 1.0.2 =
+= 1.0.3 =
 * Fixed no-results searches not being logged to analytics, giving admins complete search visibility
 * Fixed premature logging of unconfigured state before query validation; empty queries no longer logged
 * Fixed CSV export silently returning empty data when start date is after end date
@@ -173,6 +173,7 @@ The plugin is designed with privacy in mind:
 * Fixed rate-limit retry_after header potentially returning negative values
 * Removed redundant options loading in the summary REST endpoint
 * Session cache hit logging no longer counts against the per-IP rate limit
+* Fixed saving auto-purge settings clearing selected post types
 
 = 1.0.1 =
 * Added post type filtering - choose which post types are included in AI search results
@@ -197,8 +198,8 @@ The plugin is designed with privacy in mind:
 
 == Upgrade Notice ==
 
-= 1.0.2 =
-Bug fixes for analytics logging, cache correctness, CSV export validation, and rate limiting fairness.
+= 1.0.3 =
+Bug fixes for analytics logging, cache correctness, CSV export validation, rate limiting fairness, and settings persistence.
 
 = 1.0.1 =
 New settings: post type filtering, configurable max sources and content length per post, and an option to preserve data on uninstall.
