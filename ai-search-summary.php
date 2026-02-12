@@ -3,7 +3,7 @@ declare(strict_types=1);
 /**
  * Plugin Name: AI Search Summary
  * Description: Add an OpenAI powered AI summary to WordPress search results without delaying normal results, with analytics, cache control, and collapsible sources.
- * Version: 1.0.4.1
+ * Version: 1.0.5
  * Author: Jose Castillo
  * Author URI: https://github.com/RivianTrackr/
  * License: GPL v2 or later
@@ -14,7 +14,7 @@ declare(strict_types=1);
  * Domain Path: /languages
  */
 
-define( 'AI_SEARCH_VERSION', '1.0.4.1' );
+define( 'AI_SEARCH_VERSION', '1.0.5' );
 define( 'AISS_MODELS_CACHE_TTL', 7 * DAY_IN_SECONDS );
 define( 'AISS_MIN_CACHE_TTL', 60 );
 define( 'AISS_MAX_CACHE_TTL', 86400 );
@@ -25,7 +25,8 @@ define( 'AISS_MAX_SOURCES_DISPLAY', 5 );
 define( 'AISS_API_TIMEOUT', 60 );
 define( 'AISS_RATE_LIMIT_WINDOW', 70 );
 define( 'AISS_MAX_TOKENS', 1500 ); // Default; overridden by the admin setting
-define( 'AISS_IP_RATE_LIMIT', 10 ); // Requests per minute per IP
+define( 'AISS_IP_RATE_LIMIT', 10 );         // Summary requests per minute per IP
+define( 'AISS_IP_LOG_RATE_LIMIT', 60 );    // Logging/feedback requests per minute per IP
 
 // Pagination defaults
 define( 'AISS_PER_PAGE_QUERIES', 20 );
@@ -97,6 +98,7 @@ class AI_Search_Summary {
         add_action( 'wp_ajax_aiss_clear_cache', array( $this, 'ajax_clear_cache' ) );
         add_action( 'wp_ajax_aiss_purge_spam', array( $this, 'ajax_purge_spam' ) );
         add_action( 'wp_ajax_aiss_bulk_delete_logs', array( $this, 'ajax_bulk_delete_logs' ) );
+        add_action( 'wp_ajax_aiss_gdpr_purge_queries', array( $this, 'ajax_gdpr_purge_queries' ) );
         add_action( 'admin_post_aiss_export_csv', array( $this, 'handle_csv_export' ) );
         add_action( 'aiss_daily_log_purge', array( $this, 'run_scheduled_purge' ) );
         add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_admin_assets' ) );
@@ -110,6 +112,10 @@ class AI_Search_Summary {
         // updated — regardless of whether it was saved via sanitize_options() or
         // a direct update_option() call elsewhere.
         add_action( 'update_option_' . $this->option_name, array( $this, 'flush_options_cache' ) );
+
+        // Redact API keys from HTTP API debug output to prevent leaking
+        // credentials into WP_DEBUG_LOG files.
+        add_filter( 'http_api_debug', array( $this, 'redact_api_key_in_debug' ), 10, 5 );
     }
 
     /**
@@ -133,6 +139,11 @@ class AI_Search_Summary {
 
         // Prevent XSS attacks in older browsers
         header( 'X-XSS-Protection: 1; mode=block' );
+
+        // Content Security Policy — restrict resources to same-origin plus
+        // inline styles/scripts required by WordPress admin.  img-src allows
+        // data: URIs for inline badge images.
+        header( "Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://api.openai.com" );
     }
 
     public function add_plugin_settings_link( $links ) {
@@ -422,6 +433,14 @@ class AI_Search_Summary {
 
         $now = current_time( 'mysql' );
 
+        // When anonymization is enabled, store a SHA-256 hash instead of
+        // the raw query.  This preserves aggregate analytics (unique queries,
+        // totals) while removing personally-identifiable search history.
+        $options = $this->get_options();
+        if ( ! empty( $options['anonymize_queries'] ) ) {
+            $search_query = hash( 'sha256', strtolower( trim( $search_query ) ) );
+        }
+
         // Sanitize error message to prevent XSS when displayed in admin
         // Strip tags and limit length to prevent storage of malicious payloads
         $sanitized_error = '';
@@ -487,7 +506,7 @@ class AI_Search_Summary {
         global $wpdb;
 
         $table_name = self::get_feedback_table_name();
-        $ip_hash    = md5( $ip . wp_salt( 'auth' ) );
+        $ip_hash    = hash( 'sha256', $ip . wp_salt( 'auth' ) );
 
         // Use INSERT IGNORE to handle the unique constraint gracefully
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
@@ -582,6 +601,7 @@ class AI_Search_Summary {
             'color_border'         => '#94a3b8',
             'custom_css'              => '',
             'allow_reasoning_models'  => 0,
+            'anonymize_queries'       => 0,
             'spam_blocklist'          => '',
             'post_types'              => array(),
             'max_sources_display'     => AISS_MAX_SOURCES_DISPLAY,
@@ -607,6 +627,32 @@ class AI_Search_Summary {
      */
     public function flush_options_cache(): void {
         $this->options_cache = null;
+    }
+
+    /**
+     * Redact API keys from HTTP API debug data.
+     *
+     * WordPress fires `http_api_debug` after every remote request.  When
+     * WP_DEBUG_LOG is on, plugins or drop-ins may log the full request
+     * including headers.  This filter strips the Authorization header
+     * from requests to api.openai.com so the bearer token never reaches
+     * the debug log.
+     *
+     * @param mixed  $response HTTP response or WP_Error.
+     * @param string $context  'response' or 'transports'.
+     * @param string $class    Transport class name.
+     * @param array  $parsed_args Request arguments.
+     * @param string $url      Request URL.
+     * @return mixed Unmodified response (filter is used for side-effect only).
+     */
+    public function redact_api_key_in_debug( $response, $context, $class, $parsed_args, $url ) {
+        // Only intercept OpenAI requests
+        if ( is_string( $url ) && strpos( $url, 'api.openai.com' ) !== false ) {
+            if ( isset( $parsed_args['headers']['Authorization'] ) ) {
+                $parsed_args['headers']['Authorization'] = 'Bearer ***REDACTED***';
+            }
+        }
+        return $response;
     }
 
     public function sanitize_options( array $input ): array {
@@ -684,6 +730,7 @@ class AI_Search_Summary {
 
         $output['custom_css'] = isset($input['custom_css']) ? $this->sanitize_custom_css($input['custom_css']) : '';
         $output['allow_reasoning_models'] = isset($input['allow_reasoning_models']) && $input['allow_reasoning_models'] ? 1 : 0;
+        $output['anonymize_queries'] = isset($input['anonymize_queries']) && $input['anonymize_queries'] ? 1 : 0;
 
         // Spam blocklist: one term per line, sanitize each line
         if ( isset( $input['spam_blocklist'] ) ) {
@@ -806,8 +853,12 @@ class AI_Search_Summary {
             '/url\s*\(\s*["\']?\s*([^)]+?)\s*["\']?\s*\)/i',
             function( $matches ) {
                 $url = trim( $matches[1], " \t\n\r\0\x0B\"'" );
-                // Only allow relative URLs, http, https, and data:image
-                if ( preg_match( '/^(https?:|data:image\/)/i', $url ) || ! preg_match( '/^[a-z]+:/i', $url ) ) {
+                // Only allow relative URLs, http/https, and data:image with specific safe MIME types
+                if ( preg_match( '/^https?:/i', $url ) || ! preg_match( '/^[a-z]+:/i', $url ) ) {
+                    return $matches[0];
+                }
+                // Strictly allow only known-safe image data URIs
+                if ( preg_match( '/^data:image\/(png|jpe?g|gif|webp|svg\+xml)(;base64)?,/i', $url ) ) {
                     return $matches[0];
                 }
                 return ''; // Remove dangerous URLs
@@ -1016,6 +1067,7 @@ class AI_Search_Summary {
                     'auto_purge_enabled'   => 0,
                     'auto_purge_days'      => 90,
                     'preserve_data_on_uninstall' => 0,
+                    'anonymize_queries'    => 0,
                     'post_types'           => array(),
                     'max_sources_display'  => 5,
                     'content_length'       => 400,
@@ -1307,6 +1359,54 @@ class AI_Search_Summary {
         wp_send_json_success( array(
             'message' => number_format( (int) $deleted ) . ' log entries deleted.',
             'deleted' => (int) $deleted,
+        ) );
+    }
+
+    /**
+     * AJAX handler: GDPR-compliant purge of all stored search queries.
+     *
+     * Replaces every raw search_query value in the logs table with its
+     * SHA-256 hash, preserving aggregate analytics while removing
+     * personally-identifiable search history.
+     */
+    public function ajax_gdpr_purge_queries(): void {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( array( 'message' => 'Permission denied.' ) );
+        }
+
+        if ( ! isset( $_POST['nonce'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['nonce'] ) ), 'aiss_gdpr_purge' ) ) {
+            wp_send_json_error( array( 'message' => 'Invalid security token. Please refresh the page.' ) );
+        }
+
+        if ( ! $this->logs_table_is_available() ) {
+            wp_send_json_error( array( 'message' => 'Analytics table is not available.' ) );
+        }
+
+        global $wpdb;
+        $table_name = self::get_logs_table_name();
+
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+        $rows = $wpdb->get_results(
+            $wpdb->prepare( 'SELECT id, search_query FROM %i WHERE search_query NOT REGEXP %s', $table_name, '^[a-f0-9]{64}$' )
+        );
+
+        if ( empty( $rows ) ) {
+            wp_send_json_success( array( 'message' => 'No un-anonymized queries found.', 'anonymized' => 0 ) );
+        }
+
+        $count = 0;
+        foreach ( $rows as $row ) {
+            $hashed = hash( 'sha256', strtolower( trim( $row->search_query ) ) );
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+            $wpdb->update( $table_name, array( 'search_query' => $hashed ), array( 'id' => $row->id ), array( '%s' ), array( '%d' ) );
+            $count++;
+        }
+
+        delete_transient( 'aiss_analytics_overview' );
+
+        wp_send_json_success( array(
+            'message'    => number_format( $count ) . ' search queries anonymized.',
+            'anonymized' => $count,
         ) );
     }
 
@@ -2503,6 +2603,37 @@ class AI_Search_Summary {
                                 </span>
                             </div>
                         </div>
+
+                        <!-- Privacy: Anonymize Search Queries -->
+                        <div class="aiss-field">
+                            <div class="aiss-field-label">
+                                <label>Anonymize Search Queries</label>
+                            </div>
+                            <div class="aiss-field-description">
+                                When enabled, new search queries are stored as SHA-256 hashes instead of plain text. Aggregate analytics (totals, success rates) are preserved, but individual query text is not recoverable. Recommended for GDPR/privacy compliance.
+                            </div>
+                            <div class="aiss-toggle-wrapper">
+                                <label class="aiss-toggle">
+                                    <input type="checkbox"
+                                           name="<?php echo esc_attr( $this->option_name ); ?>[anonymize_queries]"
+                                           value="1"
+                                           <?php checked( ! empty( $options['anonymize_queries'] ), true ); ?> />
+                                    <span class="aiss-toggle-slider"></span>
+                                </label>
+                                <span class="aiss-toggle-label">
+                                    <?php echo ! empty( $options['anonymize_queries'] ) ? 'Enabled' : 'Disabled'; ?>
+                                </span>
+                            </div>
+                            <div style="margin-top: 12px;">
+                                <button type="button" id="aiss-gdpr-purge-btn" class="aiss-button aiss-button-secondary" style="font-size: 13px; padding: 6px 12px;">
+                                    Anonymize Existing Queries
+                                </button>
+                                <span id="aiss-gdpr-purge-result" style="font-size: 13px; margin-left: 8px;"></span>
+                                <p style="font-size: 12px; color: #6e6e73; margin-top: 4px;">
+                                    Retroactively replace all stored query text with SHA-256 hashes. This cannot be undone.
+                                </p>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -2586,6 +2717,37 @@ class AI_Search_Summary {
                         error: function() {
                             btn.prop('disabled', false).text('Refresh Models');
                             resultSpan.html('<span style="color: #ef4444;">✗ Request failed. Please try again.</span>');
+                        }
+                    });
+                });
+
+                // GDPR Purge button
+                $('#aiss-gdpr-purge-btn').on('click', function() {
+                    if (!confirm('This will permanently replace all stored search query text with SHA-256 hashes. This cannot be undone. Continue?')) return;
+
+                    var btn = $(this);
+                    var resultSpan = $('#aiss-gdpr-purge-result');
+                    btn.prop('disabled', true).text('Anonymizing...');
+                    resultSpan.html('');
+
+                    $.ajax({
+                        url: ajaxurl,
+                        type: 'POST',
+                        data: {
+                            action: 'aiss_gdpr_purge_queries',
+                            nonce: '<?php echo esc_attr( wp_create_nonce( 'aiss_gdpr_purge' ) ); ?>'
+                        },
+                        success: function(response) {
+                            btn.prop('disabled', false).text('Anonymize Existing Queries');
+                            if (response.success) {
+                                resultSpan.html('<span style="color: #10b981;">' + response.data.message + '</span>');
+                            } else {
+                                resultSpan.html('<span style="color: #ef4444;">' + response.data.message + '</span>');
+                            }
+                        },
+                        error: function() {
+                            btn.prop('disabled', false).text('Anonymize Existing Queries');
+                            resultSpan.html('<span style="color: #ef4444;">Request failed. Please try again.</span>');
                         }
                     });
                 });
@@ -3288,8 +3450,7 @@ class AI_Search_Summary {
                 <?php if ( ! empty( $recent_events ) ) : ?>
                     <div style="margin: 16px 20px 8px; display: flex; align-items: center; gap: 12px;">
                         <button type="button" id="aiss-bulk-delete-btn"
-                                class="aiss-button aiss-button-secondary" style="font-size: 13px; padding: 6px 12px; display: none;"
-                                data-nonce="<?php echo esc_attr( wp_create_nonce( 'aiss_bulk_delete_logs' ) ); ?>">
+                                class="aiss-button aiss-button-secondary" style="font-size: 13px; padding: 6px 12px; display: none;">
                             Delete Selected
                         </button>
                         <span id="aiss-bulk-delete-result" style="font-size: 13px;"></span>
@@ -3579,7 +3740,7 @@ class AI_Search_Summary {
                         type: 'POST',
                         data: {
                             action: 'aiss_bulk_delete_logs',
-                            nonce: $deleteBtn.data('nonce'),
+                            nonce: (window.AISSAdmin && window.AISSAdmin.bulkDeleteNonce) || '',
                             ids: ids.join(',')
                         },
                         success: function(response) {
@@ -3869,16 +4030,25 @@ class AI_Search_Summary {
             true
         );
 
+        // Generate a JS challenge token: an HMAC of a timestamp + nonce salt
+        // that the frontend must echo back.  Bots that skip JS execution
+        // will not have the token and are rejected in the permission check.
+        $bot_challenge_ts    = time();
+        $bot_challenge_token = hash_hmac( 'sha256', (string) $bot_challenge_ts, wp_salt( 'nonce' ) );
+
         wp_localize_script(
             'aiss',
             'AISSearch',
             array(
                 'endpoint'         => rest_url( 'aiss/v1/summary' ),
                 'feedbackEndpoint' => rest_url( 'aiss/v1/feedback' ),
+                'logEndpoint'      => rest_url( 'aiss/v1/log-session-hit' ),
                 'nonce'            => wp_create_nonce( 'wp_rest' ),
                 'query'            => get_search_query(),
                 'cacheVersion'     => $this->get_cache_namespace(),
                 'requestTimeout'   => isset( $options['request_timeout'] ) ? (int) $options['request_timeout'] : 60,
+                'botToken'         => $bot_challenge_token,
+                'botTokenTs'       => $bot_challenge_ts,
                 'errorCodes'       => array(
                     'noResults'    => AISS_ERROR_NO_RESULTS,
                     'apiError'     => AISS_ERROR_API_ERROR,
@@ -4011,6 +4181,16 @@ class AI_Search_Summary {
             array(),
             $version
         );
+
+        // Pass security nonces to admin JS via localized data instead of
+        // embedding them in HTML data-attributes.
+        wp_localize_script(
+            'jquery',
+            'AISSAdmin',
+            array(
+                'bulkDeleteNonce' => wp_create_nonce( 'aiss_bulk_delete_logs' ),
+            )
+        );
     }
 
     private function is_likely_bot(): bool {
@@ -4092,30 +4272,44 @@ class AI_Search_Summary {
      * @return bool True if rate limited.
      */
     private function is_ip_rate_limited( string $ip ): bool {
-        $rate_info = $this->get_rate_limit_info( $ip );
+        $ip_hash  = hash( 'sha256', $ip );
+        $key      = 'aiss_ip_rate_' . substr( $ip_hash, 0, 32 );
+        $lock_key = $key . '_lock';
+        $limit    = AISS_IP_RATE_LIMIT;
+        $now      = time();
+        $cutoff   = $now - 60;
 
-        if ( $rate_info['remaining'] <= 0 ) {
-            return true;
+        // Acquire a short-lived lock to prevent race conditions between
+        // concurrent requests from the same IP.  The lock is stored as a
+        // transient with a 5-second TTL so it self-clears even if something
+        // goes wrong.
+        $lock_attempts = 0;
+        while ( get_transient( $lock_key ) && $lock_attempts < 5 ) {
+            usleep( 50000 ); // 50 ms
+            $lock_attempts++;
         }
+        set_transient( $lock_key, 1, 5 );
 
-        // Add current timestamp to the list
-        $ip_hash    = md5( $ip );
-        $key        = 'aiss_ip_rate_' . $ip_hash;
         $timestamps = get_transient( $key );
-
         if ( ! is_array( $timestamps ) ) {
             $timestamps = array();
         }
 
-        // Add current timestamp and prune old ones (older than 60 seconds)
-        $now         = time();
-        $cutoff      = $now - 60;
-        $timestamps  = array_values( array_filter( $timestamps, function ( $ts ) use ( $cutoff ) {
+        // Prune timestamps older than the 60-second window
+        $timestamps = array_values( array_filter( $timestamps, function ( $ts ) use ( $cutoff ) {
             return $ts > $cutoff;
         } ) );
-        $timestamps[] = $now;
 
+        if ( count( $timestamps ) >= $limit ) {
+            // Over the limit — release lock and reject
+            delete_transient( $lock_key );
+            return true;
+        }
+
+        // Under the limit — record this request
+        $timestamps[] = $now;
         set_transient( $key, $timestamps, AISS_RATE_LIMIT_WINDOW );
+        delete_transient( $lock_key );
 
         return false;
     }
@@ -4131,8 +4325,8 @@ class AI_Search_Summary {
      */
     private function get_rate_limit_info( $ip ) {
         $limit   = AISS_IP_RATE_LIMIT;
-        $ip_hash = md5( $ip );
-        $key     = 'aiss_ip_rate_' . $ip_hash;
+        $ip_hash = hash( 'sha256', $ip );
+        $key     = 'aiss_ip_rate_' . substr( $ip_hash, 0, 32 );
 
         $timestamps = get_transient( $key );
         if ( ! is_array( $timestamps ) ) {
@@ -4161,6 +4355,42 @@ class AI_Search_Summary {
             'used'      => $used,
             'reset'     => $reset,
         );
+    }
+
+    /**
+     * Lightweight rate limiter for logging and feedback endpoints.
+     *
+     * Uses a separate, higher-threshold counter so analytics logging
+     * cannot be abused to flood the database while not consuming the
+     * user's main summary rate-limit quota.
+     *
+     * @param string $ip Client IP address.
+     * @return bool True if the IP has exceeded the log rate limit.
+     */
+    private function is_log_rate_limited( string $ip ): bool {
+        $ip_hash = hash( 'sha256', $ip );
+        $key     = 'aiss_log_rate_' . substr( $ip_hash, 0, 32 );
+        $limit   = AISS_IP_LOG_RATE_LIMIT;
+        $now     = time();
+        $cutoff  = $now - 60;
+
+        $timestamps = get_transient( $key );
+        if ( ! is_array( $timestamps ) ) {
+            $timestamps = array();
+        }
+
+        $timestamps = array_values( array_filter( $timestamps, function ( $ts ) use ( $cutoff ) {
+            return $ts > $cutoff;
+        } ) );
+
+        if ( count( $timestamps ) >= $limit ) {
+            return true;
+        }
+
+        $timestamps[] = $now;
+        set_transient( $key, $timestamps, AISS_RATE_LIMIT_WINDOW );
+
+        return false;
     }
 
     private function get_client_ip(): string {
@@ -4203,6 +4433,14 @@ class AI_Search_Summary {
                         'required'          => true,
                         'sanitize_callback' => 'sanitize_text_field',
                         'validate_callback' => array( $this, 'validate_search_query' ),
+                    ),
+                    'bt' => array(
+                        'required'          => false,
+                        'sanitize_callback' => 'sanitize_text_field',
+                    ),
+                    'bts' => array(
+                        'required'          => false,
+                        'sanitize_callback' => 'absint',
                     ),
                 ),
             )
@@ -4354,6 +4592,23 @@ class AI_Search_Summary {
             );
         }
 
+        // JS challenge token verification — bots that skip JS execution
+        // will not have the token generated in enqueue_frontend_assets().
+        // Token is valid for 10 minutes to allow for slow page loads.
+        $bt  = $request->get_param( 'bt' );
+        $bts = $request->get_param( 'bts' );
+        if ( $bt && $bts ) {
+            $expected = hash_hmac( 'sha256', (string) $bts, wp_salt( 'nonce' ) );
+            $age      = time() - (int) $bts;
+            if ( ! hash_equals( $expected, $bt ) || $age < 0 || $age > 600 ) {
+                return new WP_Error(
+                    AISS_ERROR_BOT_DETECTED,
+                    'Invalid challenge token. Please refresh the page.',
+                    array( 'status' => 403 )
+                );
+            }
+        }
+
         // Per-IP rate limiting (more aggressive than global limit)
         $client_ip = $this->get_client_ip();
         if ( $this->is_ip_rate_limited( $client_ip ) ) {
@@ -4389,6 +4644,15 @@ class AI_Search_Summary {
             );
         }
 
+        // Lightweight rate limit to prevent database flooding
+        if ( $this->is_log_rate_limited( $this->get_client_ip() ) ) {
+            return new WP_Error(
+                AISS_ERROR_RATE_LIMITED,
+                'Too many logging requests. Please slow down.',
+                array( 'status' => 429 )
+            );
+        }
+
         return true;
     }
 
@@ -4415,6 +4679,15 @@ class AI_Search_Summary {
                 AISS_ERROR_BOT_DETECTED,
                 'Feedback is not available for automated requests.',
                 array( 'status' => 403 )
+            );
+        }
+
+        // Lightweight rate limit to prevent feedback spam
+        if ( $this->is_log_rate_limited( $this->get_client_ip() ) ) {
+            return new WP_Error(
+                AISS_ERROR_RATE_LIMITED,
+                'Too many requests. Please slow down.',
+                array( 'status' => 429 )
             );
         }
 
@@ -4915,7 +5188,7 @@ class AI_Search_Summary {
             $normalized_query
         ) );
 
-        $cache_key        = $this->cache_prefix . 'ns' . $namespace . '_' . md5( $cache_key_data );
+        $cache_key        = $this->cache_prefix . 'ns' . $namespace . '_' . hash( 'sha256', $cache_key_data );
         $cached_raw       = get_transient( $cache_key );
 
         if ( $cached_raw ) {

@@ -5,6 +5,26 @@ All notable changes to AI Search Summary will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.5] - 2026-02-12
+
+### Security
+
+- **Custom CSS: Strict data URI MIME type filtering** - The `url()` sanitizer now only allows `data:image/(png|jpeg|gif|webp|svg+xml)` URIs. Previously `data:text/html` and `data:application/javascript` could bypass the filter, enabling potential XSS via the custom CSS field.
+- **Rate limiting: Atomic locking** - The per-IP rate limiter now acquires a short-lived transient lock before read-modify-write, preventing concurrent requests from bypassing the limit via a race condition.
+- **Rate limiting: Feedback/logging endpoints** - The `/log-session-hit` and `/feedback` REST endpoints now enforce a separate, higher-threshold rate limit (60/min) to prevent database flooding. Previously these had no rate limit.
+- **Hashing: MD5 replaced with SHA-256** - All internal hashing (cache keys, IP rate-limit keys, feedback IP hashes) now uses `hash('sha256', …)` instead of `md5()`.
+- **CSP header on admin pages** - Plugin admin pages now include a `Content-Security-Policy` header restricting scripts, styles, images, and connect sources to same-origin plus required OpenAI API domain.
+- **API key redaction in debug logs** - A filter on `http_api_debug` automatically strips the `Authorization: Bearer` header from OpenAI request data before WordPress writes it to `WP_DEBUG_LOG`.
+- **JS challenge token for bot detection** - The frontend now sends an HMAC-based challenge token (`bt`/`bts` parameters) with summary requests. Tokens are generated server-side in `enqueue_frontend_assets()` and validated in the REST permission check, blocking bots that skip JavaScript execution. Valid for 10 minutes.
+- **Bulk delete nonce moved to `wp_localize_script`** - The AJAX nonce for bulk-deleting log entries is no longer embedded as an HTML `data-` attribute. It is now passed via `wp_localize_script` through the `AISSAdmin` JavaScript object, reducing DOM exposure of security tokens.
+
+### Added
+
+- **Privacy: Anonymize Search Queries setting** - New toggle in Advanced settings. When enabled, search queries are stored as SHA-256 hashes instead of plain text, preserving aggregate analytics while removing personally-identifiable search history.
+- **Privacy: GDPR Purge Existing Queries** - One-click button to retroactively replace all stored search query text with SHA-256 hashes. Includes confirmation prompt and AJAX handler with full security checks.
+
+---
+
 ## [1.0.4.1] - 2026-02-11
 
 ### Improved

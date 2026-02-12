@@ -137,6 +137,11 @@
 
     var endpoint = window.AISSearch.endpoint + '?q=' + encodeURIComponent(q);
 
+    // Append JS challenge token for bot detection hardening
+    if (window.AISSearch.botToken && window.AISSearch.botTokenTs) {
+      endpoint += '&bt=' + encodeURIComponent(window.AISSearch.botToken) + '&bts=' + encodeURIComponent(window.AISSearch.botTokenTs);
+    }
+
     // Set timeout with AbortController to actually cancel the request
     var timeoutMs = (window.AISSearch.requestTimeout || 60) * 1000;
     var abortController = new AbortController();
