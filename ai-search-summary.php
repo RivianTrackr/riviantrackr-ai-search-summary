@@ -2543,13 +2543,13 @@ class AI_Search_Summary {
                         <p>Settings for advanced users</p>
                     </div>
                     <div class="aiss-section-content">
-                        <div id="aiss-advanced-toggle-wrap" style="margin-bottom: 16px;">
+                        <div id="aiss-advanced-toggle-wrap" style="padding: 20px 24px 4px;">
                             <button type="button" id="aiss-advanced-toggle" class="aiss-button aiss-button-secondary" style="font-size: 13px; padding: 8px 16px;">
                                 Show Advanced Settings
                             </button>
                         </div>
                         <div id="aiss-advanced-settings" style="display: none;">
-                            <div style="background: #fef3c7; border: 1px solid #f59e0b; border-radius: 6px; padding: 12px 16px; margin-bottom: 20px; font-size: 13px; color: #92400e;">
+                            <div style="background: #fef3c7; border: 1px solid #f59e0b; border-radius: 6px; padding: 12px 16px; margin: 0 24px 0; font-size: 13px; color: #92400e;">
                                 <strong>Warning:</strong> These settings are intended for advanced users. Incorrect changes may affect plugin behavior, API costs, or data retention. Proceed with caution.
                             </div>
                         <div class="aiss-field">
