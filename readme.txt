@@ -4,7 +4,7 @@ Tags: search, ai, openai, summary, chatgpt
 Requires at least: 6.9
 Tested up to: 6.9
 Requires PHP: 8.4
-Stable tag: 1.0.4.1
+Stable tag: 1.0.5
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -164,6 +164,18 @@ The plugin is designed with privacy in mind:
 
 == Changelog ==
 
+= 1.0.5 =
+* Security: Custom CSS url() sanitizer now restricts data: URIs to specific image MIME types only
+* Security: Rate limiting uses atomic transient locking to prevent race condition bypass
+* Security: Feedback and logging endpoints now rate-limited (60 req/min) to prevent database flooding
+* Security: Replaced all MD5 hashing with SHA-256 (cache keys, IP hashing, rate limit keys)
+* Security: Added Content-Security-Policy header to plugin admin pages
+* Security: API key automatically redacted from WP_DEBUG_LOG output via http_api_debug filter
+* Security: JS challenge token (HMAC) added to summary requests for enhanced bot detection
+* Security: Bulk delete nonce moved from HTML data-attribute to wp_localize_script
+* Added: Anonymize Search Queries setting for GDPR/privacy compliance (stores SHA-256 hashes)
+* Added: One-click GDPR purge to retroactively anonymize all stored search query text
+
 = 1.0.4.1 =
 * Added tablet responsive breakpoint (768px) and keyboard focus states for feedback buttons
 * Sources toggle state now persists across page navigations via localStorage
@@ -215,6 +227,9 @@ The plugin is designed with privacy in mind:
 * Security headers and prepared statements
 
 == Upgrade Notice ==
+
+= 1.0.5 =
+Security hardening release: stricter CSS sanitization, atomic rate limiting, SHA-256 hashing, CSP headers, API key log redaction, JS bot challenge tokens, GDPR query anonymization, and nonce handling improvements.
 
 = 1.0.4.1 =
 Polish update: tablet responsive layout, sources toggle persistence, slow-response progress indicator, bulk log deletion, badge legend, named constants, and PHP type hints.
