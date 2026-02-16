@@ -1,8 +1,8 @@
 <?php
+declare(strict_types=1);
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
-declare(strict_types=1);
 /**
  * Plugin Name: AI Search Summary
  * Description: Add an OpenAI powered AI summary to WordPress search results without delaying normal results, with analytics, cache control, and collapsible sources.
