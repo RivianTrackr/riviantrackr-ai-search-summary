@@ -6,7 +6,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Plugin Name: AI Search Summary
  * Description: Add an OpenAI powered AI summary to WordPress search results without delaying normal results, with analytics, cache control, and collapsible sources.
- * Version: 1.0.5.3
+ * Version: 1.0.5.4
  * Author: Jose Castillo
  * Author URI: https://github.com/RivianTrackr/
  * License: GPL v2 or later
@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Domain Path: /languages
  */
 
-define( 'AI_SEARCH_VERSION', '1.0.5.3' );
+define( 'AI_SEARCH_VERSION', '1.0.5.4' );
 define( 'AISS_MODELS_CACHE_TTL', 7 * DAY_IN_SECONDS );
 define( 'AISS_MIN_CACHE_TTL', 60 );
 define( 'AISS_MAX_CACHE_TTL', 86400 );
