@@ -1346,10 +1346,11 @@ class AI_Search_Summary {
         $table_name   = self::get_logs_table_name();
         $placeholders = implode( ',', array_fill( 0, count( $ids ), '%d' ) );
 
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
         $deleted = $wpdb->query(
             $wpdb->prepare(
-                "DELETE FROM {$table_name} WHERE id IN ($placeholders)",
+                "DELETE FROM %i WHERE id IN ($placeholders)",
+                $table_name,
                 ...$ids
             )
         );
