@@ -4,7 +4,7 @@ Tags: search, ai, openai, summary, chatgpt
 Requires at least: 6.9
 Tested up to: 6.9
 Requires PHP: 8.4
-Stable tag: 1.0.5.2
+Stable tag: 1.0.5.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -164,6 +164,9 @@ The plugin is designed with privacy in mind:
 
 == Changelog ==
 
+= 1.0.5.3 =
+* Fixed: Switched to phpcs:disable/enable block for bulk-delete query to fully suppress InterpolatedNotPrepared warning
+
 = 1.0.5.2 =
 * Fixed: Added ABSPATH direct access guard to main plugin file
 * Fixed: Resolved PreparedSQLPlaceholders.ReplacementsWrongNumber phpcs warning on bulk-delete query
@@ -238,6 +241,9 @@ The plugin is designed with privacy in mind:
 * Security headers and prepared statements
 
 == Upgrade Notice ==
+
+= 1.0.5.3 =
+Fixes remaining phpcs InterpolatedNotPrepared warning on bulk-delete prepared query.
 
 = 1.0.5.2 =
 Fixes direct file access protection on main plugin file and resolves prepared SQL placeholder phpcs warning.

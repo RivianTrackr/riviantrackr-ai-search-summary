@@ -5,6 +5,14 @@ All notable changes to AI Search Summary will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.5.3] - 2026-02-16
+
+### Fixed
+
+- **phpcs InterpolatedNotPrepared warning** — Switched from single-line `phpcs:ignore` to a `phpcs:disable`/`phpcs:enable` block around the bulk-delete query so the `InterpolatedNotPrepared` suppression covers the actual string literal line, not just the `$wpdb->prepare()` call above it.
+
+---
+
 ## [1.0.5.2] - 2026-02-16
 
 ### Fixed

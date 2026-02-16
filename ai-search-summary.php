@@ -6,7 +6,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Plugin Name: AI Search Summary
  * Description: Add an OpenAI powered AI summary to WordPress search results without delaying normal results, with analytics, cache control, and collapsible sources.
- * Version: 1.0.5.2
+ * Version: 1.0.5.3
  * Author: Jose Castillo
  * Author URI: https://github.com/RivianTrackr/
  * License: GPL v2 or later
@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Domain Path: /languages
  */
 
-define( 'AI_SEARCH_VERSION', '1.0.5.2' );
+define( 'AI_SEARCH_VERSION', '1.0.5.3' );
 define( 'AISS_MODELS_CACHE_TTL', 7 * DAY_IN_SECONDS );
 define( 'AISS_MIN_CACHE_TTL', 60 );
 define( 'AISS_MAX_CACHE_TTL', 86400 );
@@ -1349,15 +1349,15 @@ class AI_Search_Summary {
         $table_name   = self::get_logs_table_name();
         $placeholders = implode( ',', array_fill( 0, count( $ids ), '%d' ) );
 
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+        // phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- $placeholders is a safe list of %d tokens, count is dynamic
         $deleted = $wpdb->query(
-            // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- $placeholders is a safe list of %d tokens, count is dynamic
             $wpdb->prepare(
                 "DELETE FROM %i WHERE id IN ($placeholders)",
                 $table_name,
                 ...$ids
             )
         );
+        // phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
 
         delete_transient( 'aiss_analytics_overview' );
 
