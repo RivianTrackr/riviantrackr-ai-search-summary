@@ -5,6 +5,26 @@ All notable changes to RivianTrackr AI Search Summary will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-02-20
+
+### Added
+
+- **Anthropic Claude support** — Choose between OpenAI and Anthropic as the AI provider for generating search summaries. New "AI Provider" dropdown in Settings lets you switch between providers.
+- **Anthropic API key management** — Separate API key field for Anthropic with "Test Connection" validation. Supports secure storage via `RIVIANTRACKR_ANTHROPIC_API_KEY` constant in wp-config.php.
+- **Anthropic Claude model selection** — Curated list of Claude models: Claude Haiku 4.5, Claude Sonnet 4.5, Claude Sonnet 4.6, Claude Opus 4.5, and Claude Opus 4.6.
+- **Provider-aware "Powered by" badge** — The attribution badge dynamically displays "Powered by OpenAI" or "Powered by Anthropic" based on the active provider.
+
+### Changed
+
+- **Settings page restructured** — Getting Started section now includes an AI Provider selector with conditional API key fields that show/hide based on the selected provider.
+- **Cache keys include provider** — Switching providers automatically invalidates cached summaries to prevent serving stale responses from a different AI.
+- **CSP header updated** — `connect-src` now includes `api.anthropic.com` alongside `api.openai.com`.
+- **Debug log redaction** — API key redaction now covers both OpenAI Bearer tokens and Anthropic `x-api-key` headers.
+- **Plugin description updated** — Reflects support for both OpenAI and Anthropic Claude.
+- **Version bumped to 1.1.0** — First minor release with multi-provider support.
+
+---
+
 ## [1.0.7.1] - 2026-02-20
 
 ### Changed

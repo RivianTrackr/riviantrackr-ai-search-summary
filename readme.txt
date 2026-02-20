@@ -1,23 +1,24 @@
 === RivianTrackr AI Search Summary ===
 Contributors: josecastillo
-Tags: search, ai, openai, summary, chatgpt
+Tags: search, ai, openai, anthropic, claude, summary, chatgpt
 Requires at least: 6.9
 Tested up to: 6.9
 Requires PHP: 8.4
-Stable tag: 1.0.7.1
+Stable tag: 1.1.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Add AI-powered summaries to your WordPress search results using OpenAI's GPT models. Enhance search with intelligent, contextual summaries.
+Add AI-powered summaries to your WordPress search results using OpenAI or Anthropic Claude. Enhance search with intelligent, contextual summaries.
 
 == Description ==
 
-RivianTrackr AI Search Summary is a powerful WordPress plugin that adds AI-powered summaries to your search results using OpenAI's GPT models. Enhance your site's search experience with intelligent, contextual summaries that help users find what they're looking for faster.
+RivianTrackr AI Search Summary is a powerful WordPress plugin that adds AI-powered summaries to your search results using OpenAI or Anthropic Claude. Choose your preferred AI provider and enhance your site's search experience with intelligent, contextual summaries that help users find what they're looking for faster.
 
 = Core AI Functionality =
 
-* **AI-Powered Search Summaries** - Generate intelligent summaries from matching posts using OpenAI's GPT models
-* **Multiple Model Support** - Choose from GPT-4o, GPT-4, GPT-3.5-turbo, and reasoning models (o1, o3)
+* **AI-Powered Search Summaries** - Generate intelligent summaries from matching posts using OpenAI GPT or Anthropic Claude
+* **Multi-Provider Support** - Choose between OpenAI (GPT-4o, GPT-4, etc.) and Anthropic (Claude Sonnet, Opus, Haiku)
+* **Multiple Model Support** - Select from a wide range of models for each provider
 * **Non-Blocking Search** - AI summaries load asynchronously without delaying normal search results
 * **Smart Content Processing** - Automatic text truncation and HTML stripping for optimal API usage
 * **Collapsible Sources** - Display the articles used to generate the summary with expandable source list
@@ -54,7 +55,7 @@ RivianTrackr AI Search Summary is a powerful WordPress plugin that adds AI-power
 
 * **Color Theming** - Customize background, text, accent, and border colors
 * **Custom CSS Editor** - Add your own styles
-* **OpenAI Badge** - Optional "Powered by OpenAI" badge display
+* **AI Provider Badge** - Optional "Powered by" badge showing the active AI provider
 * **Feedback Buttons** - Optional thumbs up/down for user feedback on summaries
 
 = Data Management =
@@ -63,58 +64,70 @@ RivianTrackr AI Search Summary is a powerful WordPress plugin that adds AI-power
 * **GDPR-Friendly** - No user identification stored, IP hashing for feedback
 * **Database Optimization** - Efficient queries with proper indexing
 
-= Third-Party Service =
+= Third-Party Services =
 
-This plugin connects to the OpenAI API to generate AI-powered summaries. When a user performs a search on your site, the search query and relevant post content are sent to OpenAI's servers for processing.
+This plugin connects to external AI APIs to generate search summaries. When a user performs a search, the search query and relevant post content are sent to the selected AI provider's servers.
+
+**OpenAI**
 
 * **Service Provider:** OpenAI, L.L.C.
 * **API Endpoint:** api.openai.com
 * **Terms of Use:** [OpenAI Terms of Use](https://openai.com/policies/terms-of-use)
 * **Privacy Policy:** [OpenAI Privacy Policy](https://openai.com/policies/privacy-policy)
 
-Your use of this plugin constitutes acceptance of OpenAI's terms. No personal user data is sent to OpenAI - only the search query and excerpts from matching posts.
+**Anthropic**
+
+* **Service Provider:** Anthropic, PBC
+* **API Endpoint:** api.anthropic.com
+* **Terms of Service:** [Anthropic Terms of Service](https://www.anthropic.com/legal/consumer-terms)
+* **Privacy Policy:** [Anthropic Privacy Policy](https://www.anthropic.com/legal/privacy)
+
+Only the search query and excerpts from matching posts are sent to the selected provider. No personal user data is transmitted.
 
 == Installation ==
 
 1. Upload the `riviantrackr-ai-search-summary` folder to the `/wp-content/plugins/` directory
 2. Activate the plugin through the 'Plugins' menu in WordPress
-3. Go to **RivianTrackr AI Search Summary > Settings** and add your OpenAI API key
-4. Click "Test Connection" to verify your API key works
-5. Enable RivianTrackr AI Search Summary using the toggle
-6. Configure additional settings as needed
+3. Go to **RivianTrackr AI Search Summary > Settings** and choose your AI Provider (OpenAI or Anthropic)
+4. Add the API key for your chosen provider
+5. Click "Test Connection" to verify your API key works
+6. Enable RivianTrackr AI Search Summary using the toggle
+7. Configure additional settings as needed
 
 = Secure API Key Configuration (Recommended) =
 
-For maximum security, add your API key to `wp-config.php` instead of storing it in the database:
+For maximum security, add your API keys to `wp-config.php` instead of storing them in the database:
 
-`define( 'RIVIANTRACKR_API_KEY', 'sk-proj-your-api-key-here' );`
+`define( 'RIVIANTRACKR_API_KEY', 'sk-proj-your-openai-key-here' );`
+`define( 'RIVIANTRACKR_ANTHROPIC_API_KEY', 'sk-ant-your-anthropic-key-here' );`
 
 Benefits:
-* API key not stored in database (protected from SQL injection/database leaks)
-* Key not visible in WordPress admin (protected from admin account compromise)
+* API keys not stored in database (protected from SQL injection/database leaks)
+* Keys not visible in WordPress admin (protected from admin account compromise)
 * Easier to manage across environments (staging/production)
 
 Using environment variables:
 
 `define( 'RIVIANTRACKR_API_KEY', getenv('OPENAI_API_KEY') );`
+`define( 'RIVIANTRACKR_ANTHROPIC_API_KEY', getenv('ANTHROPIC_API_KEY') );`
 
 == Frequently Asked Questions ==
 
-= Do I need an OpenAI API key? =
+= Do I need an API key? =
 
-Yes, you need an OpenAI API account and API key to use this plugin. You can sign up at [OpenAI](https://platform.openai.com/).
+Yes, you need an API key from either OpenAI or Anthropic (depending on which provider you choose). Sign up at [OpenAI](https://platform.openai.com/) or [Anthropic Console](https://console.anthropic.com/).
 
-= How much does the OpenAI API cost? =
+= How much does the AI API cost? =
 
-OpenAI charges based on usage (tokens processed). Costs vary by model - GPT-3.5-turbo is the most affordable, while GPT-4 models cost more. The plugin includes caching to minimize API calls and reduce costs.
+Both OpenAI and Anthropic charge based on usage (tokens processed). Costs vary by model and provider. The plugin includes multi-tier caching to minimize API calls and reduce costs.
 
 = Will this slow down my search results? =
 
 No! The plugin loads AI summaries asynchronously. Your normal search results appear immediately, and the AI summary loads in the background without blocking the page.
 
-= Is my data sent to OpenAI? =
+= Is my data sent to OpenAI or Anthropic? =
 
-When a search is performed, the search query and excerpts from matching posts are sent to OpenAI for processing. No personal user data (names, emails, IPs) is sent. See OpenAI's privacy policy for how they handle data.
+When a search is performed, the search query and excerpts from matching posts are sent to the selected AI provider for processing. No personal user data (names, emails, IPs) is sent. See the provider's privacy policy for how they handle data.
 
 = Can I customize the appearance? =
 
@@ -130,11 +143,9 @@ Cache duration is configurable from 1 minute to 24 hours.
 
 = What models are supported? =
 
-The plugin supports all OpenAI GPT models including:
-* GPT-4o (recommended for best quality/speed balance)
-* GPT-4 and GPT-4 Turbo
-* GPT-3.5 Turbo (most affordable)
-* Reasoning models (o1, o3) - can be enabled in advanced settings
+**OpenAI:** GPT-4o, GPT-4.1, GPT-4 Turbo, GPT-3.5 Turbo, and reasoning models (o1, o3) via advanced settings.
+
+**Anthropic:** Claude Haiku 4.5, Claude Sonnet 4.5, Claude Sonnet 4.6, Claude Opus 4.5, and Claude Opus 4.6.
 
 = How do I see analytics? =
 
@@ -163,6 +174,16 @@ The plugin is designed with privacy in mind:
 6. WordPress dashboard widget with quick stats
 
 == Changelog ==
+
+= 1.1.0 =
+* Added: Anthropic Claude as an alternative AI provider — choose between OpenAI and Anthropic in Settings
+* Added: Separate Anthropic API key field with test connection validation and wp-config.php constant support
+* Added: Curated Claude model list (Haiku 4.5, Sonnet 4.5, Sonnet 4.6, Opus 4.5, Opus 4.6)
+* Added: Dynamic "Powered by" badge that shows the active AI provider name
+* Changed: Settings page now includes AI Provider selector with conditional API key fields
+* Changed: Cache keys include provider to prevent serving stale cross-provider responses
+* Changed: CSP connect-src updated to include api.anthropic.com
+* Changed: Debug log redaction now covers Anthropic x-api-key headers
 
 = 1.0.7.1 =
 * Changed: Plugin display name simplified to "AI Search Summary" in admin sidebar, menu pages, and plugin header
@@ -261,6 +282,9 @@ The plugin is designed with privacy in mind:
 * Security headers and prepared statements
 
 == Upgrade Notice ==
+
+= 1.1.0 =
+Multi-provider support: Choose between OpenAI and Anthropic Claude for AI-powered search summaries. Existing OpenAI setups continue working unchanged — just upgrade and optionally switch to Anthropic in Settings.
 
 = 1.0.7.1 =
 Simplified plugin display name to "AI Search Summary". Removed legacy SQL migration script and automatic migration code.
