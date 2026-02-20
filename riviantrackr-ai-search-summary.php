@@ -5,8 +5,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 /**
  * Plugin Name: AI Search Summary
- * Description: Add an OpenAI powered AI summary to WordPress search results without delaying normal results, with analytics, cache control, and collapsible sources.
- * Version: 1.0.7.1
+ * Description: Add AI-powered summaries to WordPress search results using OpenAI or Anthropic Claude. Non-blocking, with analytics, cache control, and collapsible sources.
+ * Version: 1.1.0
  * Author: Jose Castillo
  * Author URI: https://github.com/RivianTrackr/
  * License: GPL v2 or later
@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Domain Path: /languages
  */
 
-define( 'RIVIANTRACKR_VERSION', '1.0.7.1' );
+define( 'RIVIANTRACKR_VERSION', '1.1.0' );
 define( 'RIVIANTRACKR_MODELS_CACHE_TTL', 7 * DAY_IN_SECONDS );
 define( 'RIVIANTRACKR_MIN_CACHE_TTL', 60 );
 define( 'RIVIANTRACKR_MAX_CACHE_TTL', 86400 );
@@ -30,6 +30,9 @@ define( 'RIVIANTRACKR_RATE_LIMIT_WINDOW', 70 );
 define( 'RIVIANTRACKR_MAX_TOKENS', 1500 ); // Default; overridden by the admin setting
 define( 'RIVIANTRACKR_IP_RATE_LIMIT', 10 );         // Summary requests per minute per IP
 define( 'RIVIANTRACKR_IP_LOG_RATE_LIMIT', 60 );    // Logging/feedback requests per minute per IP
+
+// Anthropic API
+define( 'RIVIANTRACKR_ANTHROPIC_API_VERSION', '2023-06-01' );
 
 // Pagination defaults
 define( 'RIVIANTRACKR_PER_PAGE_QUERIES', 20 );
@@ -146,7 +149,7 @@ class RivianTrackr_AI_Search_Summary {
         // Content Security Policy — restrict resources to same-origin plus
         // inline styles/scripts required by WordPress admin.  img-src allows
         // data: URIs for inline badge images.
-        header( "Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://api.openai.com" );
+        header( "Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://api.openai.com https://api.anthropic.com" );
     }
 
     public function add_plugin_settings_link( $links ) {
@@ -556,14 +559,32 @@ class RivianTrackr_AI_Search_Summary {
         return defined( 'RIVIANTRACKR_API_KEY' ) && ! empty( RIVIANTRACKR_API_KEY );
     }
 
+    public function is_anthropic_key_from_constant() {
+        return defined( 'RIVIANTRACKR_ANTHROPIC_API_KEY' ) && ! empty( RIVIANTRACKR_ANTHROPIC_API_KEY );
+    }
+
+    /**
+     * Get the active API key for the currently selected AI provider.
+     */
+    private function get_active_api_key(): string {
+        $options = $this->get_options();
+        if ( $options['ai_provider'] === 'anthropic' ) {
+            return $options['anthropic_api_key'];
+        }
+        return $options['api_key'];
+    }
+
     public function get_options(): array {
         if ( is_array( $this->options_cache ) ) {
             return $this->options_cache;
         }
 
         $defaults = array(
+            'ai_provider'          => 'openai',
             'api_key'              => '',
             'api_key_valid'        => null,
+            'anthropic_api_key'       => '',
+            'anthropic_api_key_valid' => null,
             'model'                => '',
             'max_posts'            => 20,
             'max_tokens'           => RIVIANTRACKR_MAX_TOKENS,
@@ -592,9 +613,12 @@ class RivianTrackr_AI_Search_Summary {
         $opts = get_option( $this->option_name, array() );
         $this->options_cache = wp_parse_args( is_array( $opts ) ? $opts : array(), $defaults );
 
-        // Override API key if defined via constant (more secure than database storage)
+        // Override API keys if defined via constants (more secure than database storage)
         if ( $this->is_api_key_from_constant() ) {
             $this->options_cache['api_key'] = RIVIANTRACKR_API_KEY;
+        }
+        if ( $this->is_anthropic_key_from_constant() ) {
+            $this->options_cache['anthropic_api_key'] = RIVIANTRACKR_ANTHROPIC_API_KEY;
         }
 
         return $this->options_cache;
@@ -627,10 +651,19 @@ class RivianTrackr_AI_Search_Summary {
      * @return mixed Unmodified response (filter is used for side-effect only).
      */
     public function redact_api_key_in_debug( $response, $context, $class, $parsed_args, $url ) {
-        // Only intercept OpenAI requests
-        if ( is_string( $url ) && strpos( $url, 'api.openai.com' ) !== false ) {
+        if ( ! is_string( $url ) ) {
+            return $response;
+        }
+        // Redact OpenAI Bearer token
+        if ( strpos( $url, 'api.openai.com' ) !== false ) {
             if ( isset( $parsed_args['headers']['Authorization'] ) ) {
                 $parsed_args['headers']['Authorization'] = 'Bearer ***REDACTED***';
+            }
+        }
+        // Redact Anthropic API key
+        if ( strpos( $url, 'api.anthropic.com' ) !== false ) {
+            if ( isset( $parsed_args['headers']['x-api-key'] ) ) {
+                $parsed_args['headers']['x-api-key'] = '***REDACTED***';
             }
         }
         return $response;
@@ -643,7 +676,11 @@ class RivianTrackr_AI_Search_Summary {
         
         $output = array();
 
+        // AI Provider
+        $output['ai_provider'] = isset( $input['ai_provider'] ) && $input['ai_provider'] === 'anthropic' ? 'anthropic' : 'openai';
+
         $output['api_key']   = isset($input['api_key']) ? sanitize_text_field( trim($input['api_key']) ) : '';
+        $output['anthropic_api_key'] = isset($input['anthropic_api_key']) ? sanitize_text_field( trim($input['anthropic_api_key']) ) : '';
         $output['model']     = isset($input['model']) ? sanitize_text_field($input['model']) : '';
         $output['max_posts'] = isset($input['max_posts']) ? max(1, intval($input['max_posts'])) : 20;
 
@@ -669,7 +706,21 @@ class RivianTrackr_AI_Search_Summary {
         } else {
             $output['api_key_valid'] = null;
         }
-        
+
+        // Validate Anthropic API key when it changes
+        $old_anthropic_key = isset( $old_options['anthropic_api_key'] ) ? $old_options['anthropic_api_key'] : '';
+        if ( $output['anthropic_api_key'] !== $old_anthropic_key && ! empty( $output['anthropic_api_key'] ) ) {
+            $test = $this->test_anthropic_api_key( $output['anthropic_api_key'] );
+            $output['anthropic_api_key_valid'] = $test['success'] ? true : false;
+            if ( ! $test['success'] ) {
+                add_settings_error( $this->option_name, 'invalid_anthropic_key', 'Anthropic API key validation failed: ' . $test['message'], 'error' );
+            }
+        } elseif ( ! empty( $output['anthropic_api_key'] ) ) {
+            $output['anthropic_api_key_valid'] = isset( $old_options['anthropic_api_key_valid'] ) ? $old_options['anthropic_api_key_valid'] : null;
+        } else {
+            $output['anthropic_api_key_valid'] = null;
+        }
+
         $output['max_calls_per_minute'] = isset($input['max_calls_per_minute'])
             ? max(0, intval($input['max_calls_per_minute']))
             : 30;
@@ -770,12 +821,16 @@ class RivianTrackr_AI_Search_Summary {
             }
         }
 
-        // Auto-clear cache when model, token limit, or display settings change
+        // Auto-clear cache when provider, model, token limit, or display settings change
+        $old_provider    = isset( $old_options['ai_provider'] ) ? $old_options['ai_provider'] : 'openai';
         $old_model       = isset( $old_options['model'] ) ? $old_options['model'] : '';
         $old_show_sources = isset( $old_options['show_sources'] ) ? $old_options['show_sources'] : 0;
         $old_max_tokens  = isset( $old_options['max_tokens'] ) ? (int) $old_options['max_tokens'] : RIVIANTRACKR_MAX_TOKENS;
 
         $cache_invalidating_change = false;
+        if ( $output['ai_provider'] !== $old_provider ) {
+            $cache_invalidating_change = true;
+        }
         if ( $output['model'] !== $old_model && ! empty( $output['model'] ) ) {
             $cache_invalidating_change = true;
         }
@@ -1139,6 +1194,80 @@ class RivianTrackr_AI_Search_Summary {
         );
     }
 
+    /**
+     * Test an Anthropic API key by making a minimal messages request.
+     */
+    private function test_anthropic_api_key( string $api_key ): array {
+        if ( empty( $api_key ) ) {
+            return array(
+                'success' => false,
+                'message' => 'API key is empty.',
+            );
+        }
+
+        // Use a minimal messages request to validate the key
+        $response = wp_safe_remote_post(
+            'https://api.anthropic.com/v1/messages',
+            array(
+                'headers' => array(
+                    'x-api-key'        => $api_key,
+                    'anthropic-version' => RIVIANTRACKR_ANTHROPIC_API_VERSION,
+                    'Content-Type'     => 'application/json',
+                ),
+                'body'    => wp_json_encode( array(
+                    'model'      => 'claude-haiku-4-5',
+                    'max_tokens' => 1,
+                    'messages'   => array(
+                        array( 'role' => 'user', 'content' => 'Hi' ),
+                    ),
+                ) ),
+                'timeout' => 10,
+            )
+        );
+
+        if ( is_wp_error( $response ) ) {
+            return array(
+                'success' => false,
+                'message' => 'Connection error: ' . $response->get_error_message(),
+            );
+        }
+
+        $code = wp_remote_retrieve_response_code( $response );
+
+        if ( $code === 401 ) {
+            return array(
+                'success' => false,
+                'message' => 'Invalid API key. Please check your Anthropic key and try again.',
+            );
+        }
+
+        if ( $code === 403 ) {
+            return array(
+                'success' => false,
+                'message' => 'API key lacks required permissions. Check your Anthropic Console settings.',
+            );
+        }
+
+        if ( $code === 429 ) {
+            return array(
+                'success' => false,
+                'message' => 'Rate limit exceeded. Your API key works but has hit rate limits.',
+            );
+        }
+
+        if ( $code < 200 || $code >= 300 ) {
+            return array(
+                'success' => false,
+                'message' => 'API error (HTTP ' . $code . '). Please try again later.',
+            );
+        }
+
+        return array(
+            'success' => true,
+            'message' => 'Anthropic API key is valid and working!',
+        );
+    }
+
     public function ajax_test_api_key() {
         // Check permissions
         if ( ! current_user_can( 'manage_options' ) ) {
@@ -1150,20 +1279,36 @@ class RivianTrackr_AI_Search_Summary {
             wp_send_json_error( array( 'message' => 'Invalid nonce.' ) );
         }
 
+        // Determine which provider to test
+        $provider = isset( $_POST['provider'] ) ? sanitize_text_field( wp_unslash( $_POST['provider'] ) ) : 'openai';
+
         // Get API key - use constant if specified, otherwise from POST
         $api_key = isset( $_POST['api_key'] ) ? trim( sanitize_text_field( wp_unslash( $_POST['api_key'] ) ) ) : '';
 
         if ( $api_key === '__USE_CONSTANT__' ) {
-            if ( $this->is_api_key_from_constant() ) {
-                $api_key = RIVIANTRACKR_API_KEY;
+            if ( $provider === 'anthropic' ) {
+                if ( $this->is_anthropic_key_from_constant() ) {
+                    $api_key = RIVIANTRACKR_ANTHROPIC_API_KEY;
+                } else {
+                    wp_send_json_error( array( 'message' => 'Anthropic API key constant is not defined.' ) );
+                    return;
+                }
             } else {
-                wp_send_json_error( array( 'message' => 'API key constant is not defined.' ) );
-                return;
+                if ( $this->is_api_key_from_constant() ) {
+                    $api_key = RIVIANTRACKR_API_KEY;
+                } else {
+                    wp_send_json_error( array( 'message' => 'API key constant is not defined.' ) );
+                    return;
+                }
             }
         }
 
-        // Test the key
-        $result = $this->test_api_key( $api_key );
+        // Test the key using the appropriate provider method
+        if ( $provider === 'anthropic' ) {
+            $result = $this->test_anthropic_api_key( $api_key );
+        } else {
+            $result = $this->test_api_key( $api_key );
+        }
 
         if ( $result['success'] ) {
             wp_send_json_success( $result );
@@ -1181,7 +1326,15 @@ class RivianTrackr_AI_Search_Summary {
             wp_send_json_error( array( 'message' => 'Invalid security token. Please refresh the page.' ) );
         }
 
-        $options = $this->get_options();
+        $options  = $this->get_options();
+        $provider = $options['ai_provider'];
+
+        if ( $provider === 'anthropic' ) {
+            // Anthropic models are curated — no remote refresh needed
+            wp_send_json_success( array( 'message' => 'Anthropic models list is pre-configured.' ) );
+            return;
+        }
+
         if ( empty( $options['api_key'] ) ) {
             wp_send_json_error( array( 'message' => 'Cannot refresh models because no API key is set.' ) );
         }
@@ -1824,8 +1977,29 @@ class RivianTrackr_AI_Search_Summary {
         return $models;
     }
 
+    /**
+     * Get the curated list of Anthropic Claude models.
+     */
+    private function get_anthropic_models(): array {
+        return array(
+            'claude-haiku-4-5',
+            'claude-sonnet-4-5',
+            'claude-sonnet-4-6',
+            'claude-opus-4-5',
+            'claude-opus-4-6',
+        );
+    }
+
     private function get_available_models_for_dropdown( $api_key ) {
-        // Clean, curated default list - only chat completion models
+        $options  = $this->get_options();
+        $provider = $options['ai_provider'];
+
+        // Anthropic uses a curated model list (no remote fetch needed)
+        if ( $provider === 'anthropic' ) {
+            return $this->get_anthropic_models();
+        }
+
+        // OpenAI: Clean, curated default list - only chat completion models
         $default_models = array(
             'gpt-4o-mini',
             'gpt-4o',
@@ -1876,7 +2050,6 @@ class RivianTrackr_AI_Search_Summary {
         }
 
         // Filter out reasoning models unless the advanced setting is enabled
-        $options = $this->get_options();
         $allow_reasoning = ! empty( $options['allow_reasoning_models'] );
 
         if ( ! $allow_reasoning ) {
@@ -1947,20 +2120,22 @@ class RivianTrackr_AI_Search_Summary {
             return;
         }
 
-        $options = $this->get_options();
-        $cache   = get_option( $this->models_cache_option );
+        $options  = $this->get_options();
+        $cache    = get_option( $this->models_cache_option );
+        $provider = $options['ai_provider'];
 
         // Check if setup is complete
-        $has_api_key = ! empty( $options['api_key'] );
-        $is_enabled  = ! empty( $options['enable'] );
+        $has_api_key    = ! empty( $this->get_active_api_key() );
+        $is_enabled     = ! empty( $options['enable'] );
         $setup_complete = $has_api_key && $is_enabled;
+        $provider_label = $provider === 'anthropic' ? 'Anthropic Claude' : 'OpenAI';
         ?>
-        
+
         <div class="riviantrackr-settings-wrap">
             <!-- Header -->
             <div class="riviantrackr-header">
                 <h1>RivianTrackr AI Search Summary Settings</h1>
-                <p>Configure OpenAI-powered search summaries for your site.</p>
+                <p>Configure AI-powered search summaries for your site using <?php echo esc_html( $provider_label ); ?>.</p>
             </div>
 
             <!-- Status Card -->
@@ -1971,11 +2146,11 @@ class RivianTrackr_AI_Search_Summary {
                 <div class="riviantrackr-status-content">
                     <h3><?php echo $setup_complete ? 'RivianTrackr AI Search Summary Active' : 'Setup Required'; ?></h3>
                     <p>
-                        <?php 
+                        <?php
                         if ( $setup_complete ) {
-                            echo 'Your AI search is configured and running.';
+                            echo 'Your AI search is configured and running with ' . esc_html( $provider_label ) . '.';
                         } elseif ( ! $has_api_key ) {
-                            echo 'Add your OpenAI API key to get started.';
+                            echo 'Add your ' . esc_html( $provider_label ) . ' API key to get started.';
                         } else {
                             echo 'Enable AI search to start generating summaries.';
                         }
@@ -2009,9 +2184,9 @@ class RivianTrackr_AI_Search_Summary {
                             </div>
                             <div class="riviantrackr-toggle-wrapper">
                                 <label class="riviantrackr-toggle">
-                                    <input type="checkbox" 
+                                    <input type="checkbox"
                                            name="<?php echo esc_attr( $this->option_name ); ?>[enable]"
-                                           value="1" 
+                                           value="1"
                                            <?php checked( $options['enable'], 1 ); ?> />
                                     <span class="riviantrackr-toggle-slider"></span>
                                 </label>
@@ -2021,8 +2196,25 @@ class RivianTrackr_AI_Search_Summary {
                             </div>
                         </div>
 
-                        <!-- API Key -->
+                        <!-- AI Provider -->
                         <div class="riviantrackr-field">
+                            <div class="riviantrackr-field-label">
+                                <label>AI Provider</label>
+                            </div>
+                            <div class="riviantrackr-field-description">
+                                Choose which AI service to use for generating search summaries
+                            </div>
+                            <div class="riviantrackr-field-input">
+                                <select id="riviantrackr-ai-provider"
+                                        name="<?php echo esc_attr( $this->option_name ); ?>[ai_provider]">
+                                    <option value="openai" <?php selected( $provider, 'openai' ); ?>>OpenAI (GPT-4o, GPT-4, etc.)</option>
+                                    <option value="anthropic" <?php selected( $provider, 'anthropic' ); ?>>Anthropic (Claude Sonnet, Opus, Haiku)</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- OpenAI API Key -->
+                        <div class="riviantrackr-field riviantrackr-provider-field riviantrackr-provider-openai" <?php echo $provider !== 'openai' ? 'style="display:none;"' : ''; ?>>
                             <div class="riviantrackr-field-label">
                                 <label for="riviantrackr-api-key">OpenAI API Key</label>
                                 <?php
@@ -2066,11 +2258,65 @@ class RivianTrackr_AI_Search_Summary {
                             <div class="riviantrackr-field-actions">
                                 <button type="button"
                                         id="riviantrackr-test-key-btn"
-                                        class="riviantrackr-button riviantrackr-button-secondary">
+                                        class="riviantrackr-button riviantrackr-button-secondary"
+                                        data-provider="openai">
                                     Test Connection
                                 </button>
                             </div>
                             <div id="riviantrackr-test-result" style="margin-top: 12px;"></div>
+                        </div>
+
+                        <!-- Anthropic API Key -->
+                        <div class="riviantrackr-field riviantrackr-provider-field riviantrackr-provider-anthropic" <?php echo $provider !== 'anthropic' ? 'style="display:none;"' : ''; ?>>
+                            <div class="riviantrackr-field-label">
+                                <label for="riviantrackr-anthropic-api-key">Anthropic API Key</label>
+                                <?php
+                                $anthropic_valid = isset( $options['anthropic_api_key_valid'] ) ? $options['anthropic_api_key_valid'] : null;
+                                if ( $this->is_anthropic_key_from_constant() || ( ! empty( $options['anthropic_api_key'] ) && $anthropic_valid === true ) ) : ?>
+                                    <span style="color: #10b981; font-size: 13px; font-weight: 500; margin-left: 8px;">&#10003; Valid</span>
+                                <?php elseif ( ! empty( $options['anthropic_api_key'] ) && $anthropic_valid === false ) : ?>
+                                    <span style="color: #ef4444; font-size: 13px; font-weight: 500; margin-left: 8px;">&#10007; Invalid</span>
+                                <?php endif; ?>
+                            </div>
+                            <?php if ( $this->is_anthropic_key_from_constant() ) : ?>
+                                <div class="riviantrackr-field-description" style="background: #d1fae5; border: 1px solid #10b981; padding: 12px; border-radius: 6px; margin-bottom: 12px;">
+                                    <strong style="color: #065f46;">&#x1F512; Secure Mode:</strong>
+                                    API key is defined via <code>RIVIANTRACKR_ANTHROPIC_API_KEY</code> constant in wp-config.php.
+                                    <br><span style="color: #047857;">This is more secure than storing in the database.</span>
+                                </div>
+                                <div class="riviantrackr-field-input">
+                                    <input type="password"
+                                           id="riviantrackr-anthropic-api-key"
+                                           value="<?php echo esc_attr( str_repeat( '•', 20 ) ); ?>"
+                                           disabled
+                                           style="background: #f3f4f6; cursor: not-allowed;" />
+                                    <input type="hidden"
+                                           name="<?php echo esc_attr( $this->option_name ); ?>[anthropic_api_key]"
+                                           value="" />
+                                </div>
+                            <?php else : ?>
+                                <div class="riviantrackr-field-description">
+                                    Get your API key from <a href="https://console.anthropic.com/settings/keys" target="_blank">Anthropic Console</a>.
+                                    <br><em style="color: #6b7280; font-size: 12px;">Tip: For better security, define <code>RIVIANTRACKR_ANTHROPIC_API_KEY</code> in wp-config.php instead.</em>
+                                </div>
+                                <div class="riviantrackr-field-input">
+                                    <input type="password"
+                                           id="riviantrackr-anthropic-api-key"
+                                           name="<?php echo esc_attr( $this->option_name ); ?>[anthropic_api_key]"
+                                           value="<?php echo esc_attr( $options['anthropic_api_key'] ); ?>"
+                                           placeholder="sk-ant-..."
+                                           autocomplete="off" />
+                                </div>
+                            <?php endif; ?>
+                            <div class="riviantrackr-field-actions">
+                                <button type="button"
+                                        id="riviantrackr-test-anthropic-key-btn"
+                                        class="riviantrackr-button riviantrackr-button-secondary"
+                                        data-provider="anthropic">
+                                    Test Connection
+                                </button>
+                            </div>
+                            <div id="riviantrackr-test-anthropic-result" style="margin-top: 12px;"></div>
                         </div>
                     </div>
                 </div>
@@ -2116,13 +2362,13 @@ class RivianTrackr_AI_Search_Summary {
                             </div>
                         </div>
 
-                        <!-- Show OpenAI Badge -->
+                        <!-- Show AI Provider Badge -->
                         <div class="riviantrackr-field">
                             <div class="riviantrackr-field-label">
-                                <label>Show "Powered by OpenAI" Badge</label>
+                                <label>Show AI Provider Badge</label>
                             </div>
                             <div class="riviantrackr-field-description">
-                                Display the OpenAI attribution badge on search summaries
+                                Display a "Powered by" attribution badge on search summaries (shows the active provider)
                             </div>
                             <div class="riviantrackr-toggle-wrapper">
                                 <label class="riviantrackr-toggle">
@@ -2388,7 +2634,7 @@ class RivianTrackr_AI_Search_Summary {
                                 <label>Request Timeout</label>
                             </div>
                             <div class="riviantrackr-field-description">
-                                How long to wait for AI response before timing out (10-300 seconds). Reasoning models like GPT-5, o1, and o3 may need 120-300 seconds.
+                                How long to wait for AI response before timing out (10-300 seconds). Reasoning models (GPT-5, o1, o3) and larger Claude models (Opus) may need 120-300 seconds.
                             </div>
                             <div class="riviantrackr-field-input">
                                 <input type="number"
@@ -2499,7 +2745,7 @@ class RivianTrackr_AI_Search_Summary {
                                 <label>Allow Reasoning Models</label>
                             </div>
                             <div class="riviantrackr-field-description">
-                                Enable reasoning models (GPT-5, o1, o3, etc.) in the model dropdown. These models are significantly slower (60-300s) and more expensive due to hidden reasoning tokens. They do not produce better search summaries than standard models like GPT-4o or GPT-4.1.
+                                Enable OpenAI reasoning models (GPT-5, o1, o3, etc.) in the model dropdown. These models are significantly slower (60-300s) and more expensive due to hidden reasoning tokens. Only applies when OpenAI is the selected provider.
                             </div>
                             <div class="riviantrackr-toggle-wrapper">
                                 <label class="riviantrackr-toggle">
@@ -3697,7 +3943,7 @@ class RivianTrackr_AI_Search_Summary {
         }
 
         $options = $this->get_options();
-        if ( empty( $options['enable'] ) || empty( $options['api_key'] ) ) {
+        if ( empty( $options['enable'] ) || empty( $this->get_active_api_key() ) ) {
             return;
         }
 
@@ -3807,7 +4053,7 @@ class RivianTrackr_AI_Search_Summary {
      */
     private function render_summary_widget() {
         $options = $this->get_options();
-        if ( empty( $options['enable'] ) || empty( $options['api_key'] ) ) {
+        if ( empty( $options['enable'] ) || empty( $this->get_active_api_key() ) ) {
             return;
         }
 
@@ -3829,10 +4075,12 @@ class RivianTrackr_AI_Search_Summary {
                     <h2 style="margin:0; font-size:1.1rem;">
                         AI summary for "<?php echo esc_html( $search_query ); ?>"
                     </h2>
-                    <?php if ( $show_badge ) : ?>
-                    <span class="riviantrackr-openai-badge" aria-label="Powered by OpenAI">
+                    <?php if ( $show_badge ) :
+                        $badge_provider = $options['ai_provider'] === 'anthropic' ? 'Anthropic' : 'OpenAI';
+                    ?>
+                    <span class="riviantrackr-openai-badge" aria-label="Powered by <?php echo esc_attr( $badge_provider ); ?>">
                         <span class="riviantrackr-openai-mark" aria-hidden="true"></span>
-                        <span class="riviantrackr-openai-text">Powered by OpenAI</span>
+                        <span class="riviantrackr-openai-text">Powered by <?php echo esc_html( $badge_provider ); ?></span>
                     </span>
                     <?php endif; ?>
                 </div>
@@ -3904,10 +4152,11 @@ class RivianTrackr_AI_Search_Summary {
             'riviantrackr-admin',
             'RivianTrackrAdmin',
             array(
-                'bulkDeleteNonce'    => wp_create_nonce( 'riviantrackr_bulk_delete_logs' ),
-                'testKeyNonce'       => wp_create_nonce( 'riviantrackr_test_key' ),
-                'gdprPurgeNonce'     => wp_create_nonce( 'riviantrackr_gdpr_purge' ),
-                'useApiKeyConstant'  => $this->is_api_key_from_constant(),
+                'bulkDeleteNonce'           => wp_create_nonce( 'riviantrackr_bulk_delete_logs' ),
+                'testKeyNonce'              => wp_create_nonce( 'riviantrackr_test_key' ),
+                'gdprPurgeNonce'            => wp_create_nonce( 'riviantrackr_gdpr_purge' ),
+                'useApiKeyConstant'         => $this->is_api_key_from_constant(),
+                'useAnthropicKeyConstant'   => $this->is_anthropic_key_from_constant(),
             )
         );
     }
@@ -4763,7 +5012,7 @@ class RivianTrackr_AI_Search_Summary {
         $options      = $this->get_options();
         $search_query = $request->get_param( 'q' );
 
-        if ( empty( $options['enable'] ) || empty( $options['api_key'] ) ) {
+        if ( empty( $options['enable'] ) || empty( $this->get_active_api_key() ) ) {
             $this->log_search_event( sanitize_text_field( (string) $search_query ), 0, 0, 'AI search not enabled or API key missing' );
 
             return rest_ensure_response(
@@ -4927,8 +5176,11 @@ class RivianTrackr_AI_Search_Summary {
     }
 
     private function get_ai_data_for_search( $search_query, $posts_for_ai, &$ai_error = '', &$cache_hit = null ) {
-        $options = $this->get_options();
-        if ( empty( $options['api_key'] ) || empty( $options['enable'] ) ) {
+        $options    = $this->get_options();
+        $provider   = $options['ai_provider'];
+        $active_key = $this->get_active_api_key();
+
+        if ( empty( $active_key ) || empty( $options['enable'] ) ) {
             $ai_error = 'AI search is not configured. Please contact the site administrator.';
             $cache_hit = null; // Not applicable - config error
             return null;
@@ -4939,6 +5191,7 @@ class RivianTrackr_AI_Search_Summary {
 
         $content_length = isset( $options['content_length'] ) ? (int) $options['content_length'] : RIVIANTRACKR_CONTENT_LENGTH;
         $cache_key_data = implode( '|', array(
+            $provider,
             $options['model'],
             $options['max_posts'],
             $content_length,
@@ -4968,12 +5221,22 @@ class RivianTrackr_AI_Search_Summary {
             return null;
         }
 
-        $api_response = $this->call_openai_for_search(
-            $options['api_key'],
-            $options['model'],
-            $search_query,
-            $posts_for_ai
-        );
+        // Route to the correct provider
+        if ( $provider === 'anthropic' ) {
+            $api_response = $this->call_anthropic_for_search(
+                $active_key,
+                $options['model'],
+                $search_query,
+                $posts_for_ai
+            );
+        } else {
+            $api_response = $this->call_openai_for_search(
+                $active_key,
+                $options['model'],
+                $search_query,
+                $posts_for_ai
+            );
+        }
 
         if ( isset( $api_response['error'] ) ) {
             // Log detailed error for debugging, but show generic message to users
@@ -5349,6 +5612,275 @@ class RivianTrackr_AI_Search_Summary {
         }
 
         // Success
+        return array(
+            'success' => true,
+            'data'    => $decoded,
+        );
+    }
+
+    /**
+     * Call the Anthropic Claude API with retry logic for transient errors.
+     * Returns the decoded API response normalized to OpenAI-compatible format,
+     * or an array with 'error' key on failure.
+     */
+    private function call_anthropic_for_search( $api_key, $model, $user_query, $posts ) {
+        if ( empty( $api_key ) ) {
+            return array( 'error' => 'API key is missing. Please configure the plugin settings.' );
+        }
+
+        $endpoint = 'https://api.anthropic.com/v1/messages';
+
+        $posts_text = '';
+        foreach ( $posts as $p ) {
+            $date = isset( $p['date'] ) ? $p['date'] : '';
+            $posts_text .= "ID: {$p['id']}\n";
+            $posts_text .= "Title: {$p['title']}\n";
+            $posts_text .= "URL: {$p['url']}\n";
+            $posts_text .= "Type: {$p['type']}\n";
+            if ( $date ) {
+                $posts_text .= "Published: {$date}\n";
+            }
+            $posts_text .= "Content: {$p['content']}\n";
+            $posts_text .= "-----\n";
+        }
+
+        $options   = $this->get_options();
+        $site_name = ! empty( $options['site_name'] ) ? $options['site_name'] : get_bloginfo( 'name' );
+        $site_desc = ! empty( $options['site_description'] ) ? ', ' . $options['site_description'] : '';
+
+        $system_message = "You are the AI search engine for {$site_name}{$site_desc}.
+    Use the provided posts as your entire knowledge base.
+    Answer the user query based only on these posts.
+    Prefer newer posts over older ones when there is conflicting or overlapping information, especially for news, software updates, or product changes.
+    If something is not covered, say that the site does not have that information yet instead of making something up.
+
+    IMPORTANT: This is a one-way search interface - users cannot reply or provide clarification. Never ask follow-up questions, never ask the user to clarify, and never suggest they tell you more. Instead, provide the most comprehensive answer possible covering all likely interpretations of their query. If a query is ambiguous, briefly cover the most relevant possibilities.
+
+    Always respond as a single JSON object using this structure:
+    {
+      \"answer_html\": \"HTML formatted summary answer for the user\",
+      \"results\": [
+         {
+           \"id\": 123,
+           \"title\": \"Post title\",
+           \"url\": \"https://...\",
+           \"excerpt\": \"Short snippet\",
+           \"type\": \"post or page\"
+         }
+      ]
+    }
+
+    The results array should list up to 5 of the most relevant posts you used when creating the summary, so they can be shown as sources under the answer.";
+
+        $user_message  = "User search query: {$user_query}\n\n";
+        $user_message .= "Here are the posts from the site (with newer posts listed first where possible):\n\n{$posts_text}";
+
+        $configured_tokens = isset( $options['max_tokens'] ) ? (int) $options['max_tokens'] : RIVIANTRACKR_MAX_TOKENS;
+
+        $body = array(
+            'model'      => $model,
+            'max_tokens' => $configured_tokens,
+            'system'     => $system_message,
+            'messages'   => array(
+                array(
+                    'role'    => 'user',
+                    'content' => $user_message,
+                ),
+            ),
+        );
+
+        $args = array(
+            'headers' => array(
+                'x-api-key'        => $api_key,
+                'anthropic-version' => RIVIANTRACKR_ANTHROPIC_API_VERSION,
+                'Content-Type'     => 'application/json',
+            ),
+            'body'    => wp_json_encode( $body ),
+            'timeout' => isset( $options['request_timeout'] ) ? (int) $options['request_timeout'] : RIVIANTRACKR_API_TIMEOUT,
+        );
+
+        // Retry logic: attempt up to 3 times with exponential backoff for transient errors
+        $max_retries = 2;
+        $attempt     = 0;
+        $last_error  = null;
+
+        while ( $attempt <= $max_retries ) {
+            $result = $this->make_anthropic_request( $endpoint, $args );
+
+            if ( isset( $result['success'] ) && $result['success'] ) {
+                $api_data = $result['data'];
+
+                // Normalize Anthropic response to OpenAI-compatible format
+                $content_text = '';
+                if ( ! empty( $api_data['content'] ) && is_array( $api_data['content'] ) ) {
+                    foreach ( $api_data['content'] as $block ) {
+                        if ( isset( $block['type'] ) && $block['type'] === 'text' && isset( $block['text'] ) ) {
+                            $content_text .= $block['text'];
+                        }
+                    }
+                }
+
+                $stop_reason  = isset( $api_data['stop_reason'] ) ? $api_data['stop_reason'] : 'end_turn';
+                $finish_reason = 'stop';
+                if ( $stop_reason === 'max_tokens' ) {
+                    $finish_reason = 'length';
+                }
+
+                $normalized = array(
+                    'choices' => array(
+                        array(
+                            'message' => array(
+                                'content' => $content_text,
+                                'refusal' => null,
+                            ),
+                            'finish_reason' => $finish_reason,
+                        ),
+                    ),
+                );
+
+                if ( $attempt > 0 ) {
+                    $normalized['_retry_count'] = $attempt;
+                    if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+                        // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+                        error_log( '[RivianTrackr AI Search Summary] Anthropic request succeeded after ' . $attempt . ' retry(ies)' );
+                    }
+                }
+                return $normalized;
+            }
+
+            $is_retryable = isset( $result['retryable'] ) && $result['retryable'];
+            $last_error   = $result;
+
+            if ( ! $is_retryable || $attempt >= $max_retries ) {
+                break;
+            }
+
+            $delay = pow( 2, $attempt );
+            sleep( $delay );
+            $attempt++;
+
+            if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+                // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+                error_log( '[RivianTrackr AI Search Summary] Anthropic retry attempt ' . ( $attempt + 1 ) . ' after ' . $delay . 's delay' );
+            }
+        }
+
+        $error_msg = $last_error['error'] ?? 'Unknown error occurred.';
+        if ( $attempt > 0 ) {
+            $error_msg .= ' (after ' . ( $attempt + 1 ) . ' attempts)';
+        }
+        return array( 'error' => $error_msg );
+    }
+
+    /**
+     * Make the actual HTTP request to Anthropic.
+     * Returns array with 'success', 'data'/'error', and 'retryable' flag.
+     */
+    private function make_anthropic_request( $endpoint, $args ) {
+        $response = wp_safe_remote_post( $endpoint, $args );
+
+        if ( is_wp_error( $response ) ) {
+            $error_msg = $response->get_error_message();
+            if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+                // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+                error_log( '[RivianTrackr AI Search Summary] Anthropic API request error: ' . $error_msg );
+            }
+
+            $is_timeout    = strpos( $error_msg, 'cURL error 28' ) !== false || strpos( $error_msg, 'timed out' ) !== false;
+            $is_connection = strpos( $error_msg, 'cURL error 6' ) !== false || strpos( $error_msg, 'resolve host' ) !== false;
+
+            if ( $is_timeout ) {
+                return array(
+                    'success'   => false,
+                    'error'     => 'Request timed out. The AI service may be slow right now. Please try again.',
+                    'retryable' => true,
+                );
+            }
+            if ( $is_connection ) {
+                return array(
+                    'success'   => false,
+                    'error'     => 'Could not connect to AI service. Please check your internet connection.',
+                    'retryable' => true,
+                );
+            }
+
+            return array(
+                'success'   => false,
+                'error'     => 'Could not connect to AI service. Please try again.',
+                'retryable' => true,
+            );
+        }
+
+        $code = wp_remote_retrieve_response_code( $response );
+        $body = wp_remote_retrieve_body( $response );
+
+        if ( $code < 200 || $code >= 300 ) {
+            if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+                // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+                error_log( '[RivianTrackr AI Search Summary] Anthropic HTTP error ' . $code . ' body: ' . $body );
+            }
+
+            if ( $code === 429 ) {
+                return array(
+                    'success'   => false,
+                    'error'     => 'Anthropic rate limit exceeded. Please try again in a few moments.',
+                    'retryable' => true,
+                );
+            }
+
+            if ( $code >= 500 && $code < 600 ) {
+                return array(
+                    'success'   => false,
+                    'error'     => 'Anthropic service temporarily unavailable. Please try again later.',
+                    'retryable' => true,
+                );
+            }
+
+            if ( $code === 529 ) {
+                return array(
+                    'success'   => false,
+                    'error'     => 'Anthropic API is temporarily overloaded. Please try again later.',
+                    'retryable' => true,
+                );
+            }
+
+            if ( $code === 401 ) {
+                return array(
+                    'success'   => false,
+                    'error'     => 'Invalid Anthropic API key. Please check your plugin settings.',
+                    'retryable' => false,
+                );
+            }
+
+            if ( $code === 400 ) {
+                return array(
+                    'success'   => false,
+                    'error'     => 'The request could not be processed. Please try a different search.',
+                    'retryable' => false,
+                );
+            }
+
+            return array(
+                'success'   => false,
+                'error'     => 'AI service error. Please try again later.',
+                'retryable' => false,
+            );
+        }
+
+        $decoded = json_decode( $body, true );
+
+        if ( json_last_error() !== JSON_ERROR_NONE ) {
+            if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+                // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+                error_log( '[RivianTrackr AI Search Summary] Failed to decode Anthropic response: ' . json_last_error_msg() );
+            }
+            return array(
+                'success'   => false,
+                'error'     => 'Could not understand AI response. Please try again.',
+                'retryable' => true,
+            );
+        }
+
         return array(
             'success' => true,
             'data'    => $decoded,
