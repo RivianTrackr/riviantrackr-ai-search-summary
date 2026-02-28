@@ -1,0 +1,8 @@
+{
+    "name": "riviantrackr/ai-search-summary",
+    "type": "wordpress-plugin",
+    "require-dev": {
+        "phpunit/phpunit": "^10"
+    },
+    "require": {}
+}

@@ -6,7 +6,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Plugin Name: AI Search Summary
  * Description: Add AI-powered summaries to WordPress search results using OpenAI or Anthropic Claude. Non-blocking, with analytics, cache control, and collapsible sources.
- * Version: 1.1.0.3
+ * Version: 1.2.0
  * Author: Jose Castillo
  * Author URI: https://github.com/RivianTrackr/
  * License: GPL v2 or later
@@ -17,7 +17,17 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Domain Path: /languages
  */
 
-define( 'RIVIANTRACKR_VERSION', '1.1.0.3' );
+define( 'RIVIANTRACKR_VERSION', '1.2.0' );
+
+// Load the namespaced class autoloader.
+require_once __DIR__ . '/includes/class-autoloader.php';
+RivianTrackr\AISearchSummary\Autoloader::register( __DIR__ . '/includes' );
+
+use RivianTrackr\AISearchSummary\ApiHandler;
+use RivianTrackr\AISearchSummary\CacheManager;
+use RivianTrackr\AISearchSummary\RateLimiter;
+use RivianTrackr\AISearchSummary\Analytics;
+use RivianTrackr\AISearchSummary\InputValidator;
 define( 'RIVIANTRACKR_MODELS_CACHE_TTL', 7 * DAY_IN_SECONDS );
 define( 'RIVIANTRACKR_MIN_CACHE_TTL', 60 );
 define( 'RIVIANTRACKR_MAX_CACHE_TTL', 86400 );
@@ -68,21 +78,25 @@ define( 'RIVIANTRACKR_ERROR_NO_RESULTS', 'no_results' );
 
 class RivianTrackr_AI_Search_Summary {
 
-    private $option_name         = 'riviantrackr_options';
-    private $models_cache_option = 'riviantrackr_models_cache';
-    private $cache_keys_option      = 'riviantrackr_cache_keys';
-    private $cache_namespace_option = 'riviantrackr_cache_namespace';
-    private $cache_prefix;
-    private $cache_ttl           = 3600;
+    private string $option_name = 'riviantrackr_options';
+    private $options_cache      = null;
+    private bool $summary_injected = false;
 
-    private $logs_table_checked  = false;
-    private $logs_table_exists   = false;
-    private $options_cache       = null;
-    private $summary_injected    = false;
+    // Component classes (namespaced under RivianTrackr\AISearchSummary).
+    private ApiHandler $api_handler;
+    private CacheManager $cache_manager;
+    private RateLimiter $rate_limiter;
+    private Analytics $analytics;
+    private InputValidator $input_validator;
 
     public function __construct() {
 
-        $this->cache_prefix = 'riviantrackr_v' . str_replace( '.', '_', RIVIANTRACKR_VERSION ) . '_';
+        // Instantiate extracted component classes.
+        $this->api_handler     = new ApiHandler();
+        $this->cache_manager   = new CacheManager();
+        $this->rate_limiter    = new RateLimiter();
+        $this->analytics       = new Analytics();
+        $this->input_validator = new InputValidator();
 
         // Register settings on admin_init (the recommended hook for Settings API)
         add_action( 'admin_init', array( $this, 'register_settings' ) );
@@ -165,13 +179,11 @@ class RivianTrackr_AI_Search_Summary {
     }
 
     private static function get_logs_table_name(): string {
-        global $wpdb;
-        return $wpdb->prefix . 'riviantrackr_logs';
+        return Analytics::get_logs_table_name();
     }
 
     private static function get_feedback_table_name(): string {
-        global $wpdb;
-        return $wpdb->prefix . 'riviantrackr_feedback';
+        return Analytics::get_feedback_table_name();
     }
 
 
@@ -355,22 +367,7 @@ class RivianTrackr_AI_Search_Summary {
     }
 
     private function logs_table_is_available(): bool {
-        if ( $this->logs_table_checked ) {
-            return $this->logs_table_exists;
-        }
-
-        global $wpdb;
-        $table_name = self::get_logs_table_name();
-
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-        $result = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table_name ) );
-
-        // Do not attempt to create or repair tables during normal requests.
-        // Table creation is handled on plugin activation and via the explicit admin action.
-        $this->logs_table_checked = true;
-        $this->logs_table_exists  = ( $result === $table_name );
-
-        return $this->logs_table_exists;
+        return $this->analytics->logs_table_is_available();
     }
 
     /**
@@ -380,104 +377,23 @@ class RivianTrackr_AI_Search_Summary {
      * @return int|false Number of rows deleted, or false on failure.
      */
     private function purge_old_logs( $days = 30 ) {
-        if ( ! $this->logs_table_is_available() ) {
-            return false;
-        }
-
-        global $wpdb;
-        $table_name  = self::get_logs_table_name();
-        $cutoff_date = gmdate( 'Y-m-d H:i:s', time() - ( absint( $days ) * DAY_IN_SECONDS ) );
-
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-        $deleted = $wpdb->query(
-            $wpdb->prepare(
-                'DELETE FROM %i WHERE created_at < %s',
-                $table_name,
-                $cutoff_date
-            )
-        );
-
-        return $deleted;
+        return $this->analytics->purge_old_logs( (int) $days );
     }
 
     private function log_search_event( $search_query, $results_count, $ai_success, $ai_error = '', $cache_hit = null, $response_time_ms = null, $ai_model = null ) {
-        if ( empty( $search_query ) ) {
-            return;
-        }
+        $options   = $this->get_options();
+        $anonymize = ! empty( $options['anonymize_queries'] );
 
-        if ( ! $this->logs_table_is_available() ) {
-            return;
-        }
-
-        global $wpdb;
-        $table_name = self::get_logs_table_name();
-
-        $now = current_time( 'mysql' );
-
-        // When anonymization is enabled, store a SHA-256 hash instead of
-        // the raw query.  This preserves aggregate analytics (unique queries,
-        // totals) while removing personally-identifiable search history.
-        $options = $this->get_options();
-        if ( ! empty( $options['anonymize_queries'] ) ) {
-            $search_query = hash( 'sha256', strtolower( trim( $search_query ) ) );
-        }
-
-        // Sanitize error message to prevent XSS when displayed in admin
-        // Strip tags and limit length to prevent storage of malicious payloads
-        $sanitized_error = '';
-        if ( ! empty( $ai_error ) ) {
-            $sanitized_error = wp_strip_all_tags( $ai_error );
-            $sanitized_error = sanitize_text_field( $sanitized_error );
-            // Limit error message length to prevent oversized storage
-            if ( function_exists( 'mb_substr' ) ) {
-                $sanitized_error = mb_substr( $sanitized_error, 0, RIVIANTRACKR_ERROR_MAX_LENGTH, 'UTF-8' );
-            } else {
-                $sanitized_error = substr( $sanitized_error, 0, 500 );
-            }
-        }
-
-        $data = array(
-            'search_query'  => $search_query,
-            'results_count' => (int) $results_count,
-            'ai_success'    => $ai_success ? 1 : 0,
-            'ai_error'      => $sanitized_error,
-            'created_at'    => $now,
+        $this->analytics->log_search_event(
+            (string) $search_query,
+            (int) $results_count,
+            (int) $ai_success,
+            (string) $ai_error,
+            $cache_hit,
+            $response_time_ms !== null ? (int) $response_time_ms : null,
+            $ai_model !== null ? (string) $ai_model : null,
+            $anonymize
         );
-
-        $formats = array( '%s', '%d', '%d', '%s', '%s' );
-
-        // Only include nullable columns when they have values,
-        // so MySQL uses DEFAULT NULL instead of receiving an empty string.
-        if ( $cache_hit !== null ) {
-            $data['cache_hit'] = $cache_hit ? 1 : 0;
-            $formats[]         = '%d';
-        }
-
-        if ( $response_time_ms !== null ) {
-            $data['response_time_ms'] = (int) $response_time_ms;
-            $formats[]                = '%d';
-        }
-
-        if ( $ai_model !== null ) {
-            $data['ai_model'] = sanitize_text_field( $ai_model );
-            $formats[]        = '%s';
-        }
-
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-        $result = $wpdb->insert(
-            $table_name,
-            $data,
-            $formats
-        );
-
-        if ( false === $result && defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-            // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
-            error_log(
-                '[RivianTrackr AI Search Summary] Failed to log search event: ' .
-                $wpdb->last_error .
-                ' | Query: ' . substr( $search_query, 0, 50 )
-            );
-        }
     }
 
     /**
@@ -489,34 +405,7 @@ class RivianTrackr_AI_Search_Summary {
      * @return bool|string True on success, 'duplicate' if already voted, false on error.
      */
     private function record_feedback( $search_query, $helpful, $ip ) {
-        global $wpdb;
-
-        $table_name = self::get_feedback_table_name();
-        $ip_hash    = hash( 'sha256', $ip . wp_salt( 'auth' ) );
-
-        // Use INSERT IGNORE to handle the unique constraint gracefully
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-        $result = $wpdb->query(
-            $wpdb->prepare(
-                'INSERT IGNORE INTO %i (search_query, helpful, ip_hash, created_at) VALUES (%s, %d, %s, %s)',
-                $table_name,
-                substr( $search_query, 0, 255 ),
-                $helpful ? 1 : 0,
-                $ip_hash,
-                current_time( 'mysql' )
-            )
-        );
-
-        if ( false === $result ) {
-            return false;
-        }
-
-        // rows_affected = 0 means duplicate (INSERT IGNORE skipped)
-        if ( 0 === $wpdb->rows_affected ) {
-            return 'duplicate';
-        }
-
-        return true;
+        return $this->analytics->record_feedback( (string) $search_query, (bool) $helpful, (string) $ip );
     }
 
     /**
@@ -525,31 +414,7 @@ class RivianTrackr_AI_Search_Summary {
      * @return array Feedback stats.
      */
     private function get_feedback_stats() {
-        global $wpdb;
-
-        $table_name = self::get_feedback_table_name();
-
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-        $stats = $wpdb->get_row(
-            $wpdb->prepare(
-                'SELECT
-                    COUNT(*) AS total_votes,
-                    SUM(helpful) AS helpful_count,
-                    COUNT(*) - SUM(helpful) AS not_helpful_count
-                 FROM %i',
-                $table_name
-            )
-        );
-
-        $total   = $stats ? (int) $stats->total_votes : 0;
-        $helpful = $stats ? (int) $stats->helpful_count : 0;
-
-        return array(
-            'total_votes'       => $total,
-            'helpful_count'     => $helpful,
-            'not_helpful_count' => $total - $helpful,
-            'helpful_rate'      => $total > 0 ? round( ( $helpful / $total ) * 100, 1 ) : 0,
-        );
+        return $this->analytics->get_feedback_stats();
     }
 
     /**
@@ -859,60 +724,7 @@ class RivianTrackr_AI_Search_Summary {
      * @return string Sanitized CSS.
      */
     private function sanitize_custom_css( string $css ): string {
-        if ( empty( $css ) ) {
-            return '';
-        }
-
-        // Strip HTML tags first
-        $css = wp_strip_all_tags( $css );
-
-        // Remove null bytes and other control characters
-        $css = preg_replace( '/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $css );
-
-        // Dangerous patterns to remove (case-insensitive)
-        $dangerous_patterns = array(
-            '/expression\s*\(/i',           // IE CSS expressions
-            '/javascript\s*:/i',            // JavaScript URLs
-            '/vbscript\s*:/i',              // VBScript URLs
-            '/behavior\s*:/i',              // IE behaviors
-            '/-moz-binding\s*:/i',          // Firefox XBL
-            '/@import/i',                   // External CSS imports
-            '/@charset/i',                  // Charset declarations
-            '/binding\s*:/i',               // Generic binding
-            '/\\\\[0-9a-f]+/i',             // Escaped unicode (can bypass filters)
-        );
-
-        foreach ( $dangerous_patterns as $pattern ) {
-            $css = preg_replace( $pattern, '', $css );
-        }
-
-        // Remove url() with potentially dangerous schemes
-        $css = preg_replace_callback(
-            '/url\s*\(\s*["\']?\s*([^)]+?)\s*["\']?\s*\)/i',
-            function( $matches ) {
-                $url = trim( $matches[1], " \t\n\r\0\x0B\"'" );
-                // Only allow relative URLs, http/https, and data:image with specific safe MIME types
-                if ( preg_match( '/^https?:/i', $url ) || ! preg_match( '/^[a-z]+:/i', $url ) ) {
-                    return $matches[0];
-                }
-                // Strictly allow only known-safe raster image data URIs
-                // Note: SVG is intentionally excluded because SVG can contain
-                // embedded <script> tags and event handlers (XSS vector).
-                if ( preg_match( '/^data:image\/(png|jpe?g|gif|webp)(;base64)?,/i', $url ) ) {
-                    return $matches[0];
-                }
-                return ''; // Remove dangerous URLs
-            },
-            $css
-        );
-
-        // Limit length to prevent DoS
-        $max_length = RIVIANTRACKR_CUSTOM_CSS_MAX_LENGTH;
-        if ( strlen( $css ) > $max_length ) {
-            $css = substr( $css, 0, $max_length );
-        }
-
-        return trim( $css );
+        return $this->input_validator->sanitize_custom_css( $css );
     }
 
     /**
@@ -1906,15 +1718,7 @@ class RivianTrackr_AI_Search_Summary {
      * Does NOT match: gpt-4o (the "o" is part of the model name, not the o-series).
      */
     private static function is_reasoning_model( string $model_id ): bool {
-        // o-series reasoning models: o1, o3, o4-mini, etc.
-        if ( preg_match( '/^o\d/', $model_id ) ) {
-            return true;
-        }
-        // GPT-5 class models are reasoning models
-        if ( strpos( $model_id, 'gpt-5' ) === 0 ) {
-            return true;
-        }
-        return false;
+        return ApiHandler::is_reasoning_model( $model_id );
     }
 
     private function fetch_models_from_openai( $api_key ) {
@@ -2093,35 +1897,11 @@ class RivianTrackr_AI_Search_Summary {
     }
 
     private function get_cache_namespace(): int {
-        $ns = (int) get_option( $this->cache_namespace_option, 1 );
-        if ( $ns < 1 ) {
-            $ns = 1;
-            update_option( $this->cache_namespace_option, $ns );
-        }
-        return $ns;
-    }
-
-    private function bump_cache_namespace(): int {
-        $ns = $this->get_cache_namespace();
-        $ns++;
-        update_option( $this->cache_namespace_option, $ns );
-        return $ns;
+        return $this->cache_manager->get_namespace();
     }
 
     private function clear_ai_cache(): bool {
-        // Namespace based invalidation: bump namespace so all previous cache keys become unreachable.
-        $this->bump_cache_namespace();
-
-        // Backward compatibility cleanup: if older versions stored explicit transient keys, delete them too.
-        $keys = get_option( $this->cache_keys_option, array() );
-        if ( is_array( $keys ) ) {
-            foreach ( $keys as $key ) {
-                delete_transient( $key );
-            }
-        }
-        delete_option( $this->cache_keys_option );
-
-        return true;
+        return $this->cache_manager->clear();
     }
 
     public function render_settings_page() {
@@ -3746,11 +3526,7 @@ class RivianTrackr_AI_Search_Summary {
      * @return int Success rate as a percentage (0-100).
      */
     private function calculate_success_rate( int $success_count, int $total ): int {
-        if ( $total <= 0 ) {
-            return 0;
-        }
-        
-        return (int) round( ( $success_count / $total ) * 100 );
+        return $this->analytics->calculate_success_rate( $success_count, $total );
     }
 
     /* ---------------------------------------------------------
@@ -4175,72 +3951,7 @@ class RivianTrackr_AI_Search_Summary {
     }
 
     private function is_likely_bot(): bool {
-        // No user agent = definitely suspicious
-        if ( ! isset( $_SERVER['HTTP_USER_AGENT'] ) || empty( $_SERVER['HTTP_USER_AGENT'] ) ) {
-            return true;
-        }
-
-        $user_agent = strtolower( sanitize_text_field( wp_unslash( $_SERVER['HTTP_USER_AGENT'] ) ) );
-
-        // Very short user agents are suspicious (real browsers have long UA strings)
-        if ( strlen( $user_agent ) < 20 ) {
-            return true;
-        }
-
-        // Common bot patterns in user agent
-        $bot_patterns = array(
-            'bot', 'crawl', 'spider', 'slurp', 'scanner',
-            'scraper', 'curl', 'wget', 'python', 'java/',
-            'libwww', 'httpunit', 'nutch', 'phpcrawl',
-            'msnbot', 'adidxbot', 'blekkobot', 'teoma',
-            'gigabot', 'dotbot', 'yandex', 'seokicks',
-            'ahrefsbot', 'semrushbot', 'mj12bot', 'baiduspider',
-            'headless', 'phantom', 'selenium', 'puppeteer',
-            'playwright', 'webdriver', 'httpclient', 'okhttp',
-            'go-http-client', 'apache-httpclient', 'node-fetch',
-            'axios', 'request/', 'postman', 'insomnia',
-        );
-
-        foreach ( $bot_patterns as $pattern ) {
-            if ( strpos( $user_agent, $pattern ) !== false ) {
-                return true;
-            }
-        }
-
-        // Check for missing standard browser headers
-        // Real browsers always send Accept-Language
-        if ( empty( $_SERVER['HTTP_ACCEPT_LANGUAGE'] ) ) {
-            return true;
-        }
-
-        // Real browsers send Accept header with text/html or */*
-        if ( empty( $_SERVER['HTTP_ACCEPT'] ) ) {
-            return true;
-        }
-
-        // Check for headless browser indicators
-        // Headless Chrome often has specific patterns
-        if ( strpos( $user_agent, 'headlesschrome' ) !== false ) {
-            return true;
-        }
-
-        // Check if user agent claims to be a browser but lacks typical browser headers
-        $claims_browser = (
-            strpos( $user_agent, 'mozilla' ) !== false ||
-            strpos( $user_agent, 'chrome' ) !== false ||
-            strpos( $user_agent, 'safari' ) !== false ||
-            strpos( $user_agent, 'firefox' ) !== false ||
-            strpos( $user_agent, 'edge' ) !== false
-        );
-
-        if ( $claims_browser ) {
-            // Browsers should have Accept-Encoding header
-            if ( empty( $_SERVER['HTTP_ACCEPT_ENCODING'] ) ) {
-                return true;
-            }
-        }
-
-        return false;
+        return $this->rate_limiter->is_likely_bot();
     }
 
     /**
@@ -4253,46 +3964,7 @@ class RivianTrackr_AI_Search_Summary {
      * @return bool True if rate limited.
      */
     private function is_ip_rate_limited( string $ip ): bool {
-        $ip_hash  = hash( 'sha256', $ip );
-        $key      = 'riviantrackr_ip_rate_' . substr( $ip_hash, 0, 32 );
-        $lock_key = $key . '_lock';
-        $limit    = RIVIANTRACKR_IP_RATE_LIMIT;
-        $now      = time();
-        $cutoff   = $now - 60;
-
-        // Acquire a short-lived lock to prevent race conditions between
-        // concurrent requests from the same IP.  The lock is stored as a
-        // transient with a 5-second TTL so it self-clears even if something
-        // goes wrong.
-        $lock_attempts = 0;
-        while ( get_transient( $lock_key ) && $lock_attempts < 5 ) {
-            usleep( 50000 ); // 50 ms
-            $lock_attempts++;
-        }
-        set_transient( $lock_key, 1, 5 );
-
-        $timestamps = get_transient( $key );
-        if ( ! is_array( $timestamps ) ) {
-            $timestamps = array();
-        }
-
-        // Prune timestamps older than the 60-second window
-        $timestamps = array_values( array_filter( $timestamps, function ( $ts ) use ( $cutoff ) {
-            return $ts > $cutoff;
-        } ) );
-
-        if ( count( $timestamps ) >= $limit ) {
-            // Over the limit — release lock and reject
-            delete_transient( $lock_key );
-            return true;
-        }
-
-        // Under the limit — record this request
-        $timestamps[] = $now;
-        set_transient( $key, $timestamps, RIVIANTRACKR_RATE_LIMIT_WINDOW );
-        delete_transient( $lock_key );
-
-        return false;
+        return $this->rate_limiter->is_ip_rate_limited( $ip );
     }
 
     /**
@@ -4305,37 +3977,7 @@ class RivianTrackr_AI_Search_Summary {
      * @return array Rate limit info with 'limit', 'remaining', 'used', and 'reset' keys.
      */
     private function get_rate_limit_info( $ip ) {
-        $limit   = RIVIANTRACKR_IP_RATE_LIMIT;
-        $ip_hash = hash( 'sha256', $ip );
-        $key     = 'riviantrackr_ip_rate_' . substr( $ip_hash, 0, 32 );
-
-        $timestamps = get_transient( $key );
-        if ( ! is_array( $timestamps ) ) {
-            $timestamps = array();
-        }
-
-        // Filter to timestamps within the last 60 seconds
-        $now    = time();
-        $cutoff = $now - 60;
-        $recent = array_filter( $timestamps, function ( $ts ) use ( $cutoff ) {
-            return $ts > $cutoff;
-        } );
-
-        $used = count( $recent );
-
-        // Calculate reset time based on oldest timestamp in window
-        $reset = $now + 60;
-        if ( ! empty( $recent ) ) {
-            $oldest = min( $recent );
-            $reset  = $oldest + 60;
-        }
-
-        return array(
-            'limit'     => $limit,
-            'remaining' => max( 0, $limit - $used ),
-            'used'      => $used,
-            'reset'     => $reset,
-        );
+        return $this->rate_limiter->get_rate_limit_info( (string) $ip );
     }
 
     /**
@@ -4349,56 +3991,11 @@ class RivianTrackr_AI_Search_Summary {
      * @return bool True if the IP has exceeded the log rate limit.
      */
     private function is_log_rate_limited( string $ip ): bool {
-        $ip_hash = hash( 'sha256', $ip );
-        $key     = 'riviantrackr_log_rate_' . substr( $ip_hash, 0, 32 );
-        $limit   = RIVIANTRACKR_IP_LOG_RATE_LIMIT;
-        $now     = time();
-        $cutoff  = $now - 60;
-
-        $timestamps = get_transient( $key );
-        if ( ! is_array( $timestamps ) ) {
-            $timestamps = array();
-        }
-
-        $timestamps = array_values( array_filter( $timestamps, function ( $ts ) use ( $cutoff ) {
-            return $ts > $cutoff;
-        } ) );
-
-        if ( count( $timestamps ) >= $limit ) {
-            return true;
-        }
-
-        $timestamps[] = $now;
-        set_transient( $key, $timestamps, RIVIANTRACKR_RATE_LIMIT_WINDOW );
-
-        return false;
+        return $this->rate_limiter->is_log_rate_limited( $ip );
     }
 
     private function get_client_ip(): string {
-        // Use REMOTE_ADDR by default - it's the only non-spoofable source.
-        // Sites behind trusted reverse proxies can define RIVIANTRACKR_TRUSTED_PROXY_HEADER
-        // to read from X-Forwarded-For or similar headers.
-        $ip = isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ) ) : 'unknown';
-
-        // Allow sites behind trusted proxies to use forwarded headers
-        if ( defined( 'RIVIANTRACKR_TRUSTED_PROXY_HEADER' ) && RIVIANTRACKR_TRUSTED_PROXY_HEADER ) {
-            $header = 'HTTP_' . strtoupper( str_replace( '-', '_', RIVIANTRACKR_TRUSTED_PROXY_HEADER ) );
-            if ( ! empty( $_SERVER[ $header ] ) ) {
-                // Take the first IP in the list (original client)
-                $ips = explode( ',', sanitize_text_field( wp_unslash( $_SERVER[ $header ] ) ) );
-                $forwarded_ip = trim( $ips[0] );
-                if ( filter_var( $forwarded_ip, FILTER_VALIDATE_IP ) ) {
-                    $ip = $forwarded_ip;
-                }
-            }
-        }
-
-        // Validate IP
-        if ( filter_var( $ip, FILTER_VALIDATE_IP ) ) {
-            return $ip;
-        }
-
-        return 'unknown';
+        return $this->rate_limiter->get_client_ip();
     }
 
     public function register_rest_routes() {
@@ -4579,9 +4176,7 @@ class RivianTrackr_AI_Search_Summary {
         $bt  = $request->get_param( 'bt' );
         $bts = $request->get_param( 'bts' );
         if ( $bt && $bts ) {
-            $expected = hash_hmac( 'sha256', (string) $bts, wp_salt( 'nonce' ) );
-            $age      = time() - (int) $bts;
-            if ( ! hash_equals( $expected, $bt ) || $age < 0 || $age > 600 ) {
+            if ( ! $this->rate_limiter->validate_bot_token( $bt, (int) $bts ) ) {
                 return new WP_Error(
                     RIVIANTRACKR_ERROR_BOT_DETECTED,
                     'Invalid challenge token. Please refresh the page.',
@@ -4684,39 +4279,11 @@ class RivianTrackr_AI_Search_Summary {
      * @return bool True if valid.
      */
     public function validate_search_query( $value, $request, $param ) {
-        // Query must be a string
         if ( ! is_string( $value ) ) {
             return false;
         }
-
-        // Must not be empty after trimming
-        if ( empty( trim( $value ) ) ) {
-            return false;
-        }
-
-        // Reasonable length limits (prevent abuse)
-        // Use mb_strlen for proper multi-byte character support
-        $length = function_exists( 'mb_strlen' ) ? mb_strlen( $value, 'UTF-8' ) : strlen( $value );
-        if ( $length < RIVIANTRACKR_QUERY_MIN_LENGTH || $length > RIVIANTRACKR_QUERY_MAX_LENGTH ) {
-            return false;
-        }
-
-        // Also check byte length to prevent oversized payloads
-        if ( strlen( $value ) > RIVIANTRACKR_QUERY_MAX_BYTES ) {
-            return false;
-        }
-
-        // Block SQL injection attempts
-        if ( $this->is_sql_injection_attempt( $value ) ) {
-            return false;
-        }
-
-        // Block spam queries (URLs, emails, phone numbers, known spam, blocklist)
-        if ( $this->is_spam_query( $value ) ) {
-            return false;
-        }
-
-        return true;
+        $options = $this->get_options();
+        return $this->input_validator->validate_search_query( $value, $options );
     }
 
     /**
@@ -4726,93 +4293,7 @@ class RivianTrackr_AI_Search_Summary {
      * @return bool True if SQL injection pattern detected.
      */
     private function is_sql_injection_attempt( string $value ): bool {
-        // Normalize: lowercase and decode URL encoding
-        $normalized = strtolower( urldecode( $value ) );
-
-        // Remove SQL comment obfuscation (/**/)
-        $normalized = preg_replace( '/\/\*.*?\*\//', ' ', $normalized );
-
-        // Normalize whitespace (including encoded whitespace chars)
-        $normalized = preg_replace( '/[\s\x00-\x1f]+/', ' ', $normalized );
-
-        // SQL injection patterns to block
-        $sql_patterns = array(
-            // SQL keywords with operators
-            'select.*from',
-            'union.*select',
-            'insert.*into',
-            'delete.*from',
-            'update.*set',
-            'drop.*table',
-            'create.*table',
-            'alter.*table',
-            'exec.*\(',
-            'execute.*\(',
-
-            // SQL functions commonly used in injection
-            'concat\s*\(',
-            'char\s*\(',
-            'chr\s*\(',
-            'substring\s*\(',
-            'ascii\s*\(',
-            'hex\s*\(',
-            'unhex\s*\(',
-            'load_file\s*\(',
-            'outfile',
-            'dumpfile',
-            'benchmark\s*\(',
-            'sleep\s*\(',
-            'waitfor.*delay',
-
-            // Oracle-specific (common in automated scanners)
-            'ctxsys\.',
-            'drithsx',
-            'from\s+dual',
-            'dbms_',
-            'utl_',
-
-            // SQL Server specific
-            'xp_cmdshell',
-            'sp_executesql',
-            'information_schema',
-            'sysobjects',
-            'syscolumns',
-
-            // Boolean-based injection patterns
-            '\band\b.*=.*\bcase\b',
-            '\bor\b.*=.*\bcase\b',
-            'when.*then.*else.*end',
-
-            // Comment-based injection
-            '--\s*$',
-            '#\s*$',
-
-            // Stacked queries
-            ';\s*select',
-            ';\s*insert',
-            ';\s*update',
-            ';\s*delete',
-            ';\s*drop',
-        );
-
-        foreach ( $sql_patterns as $pattern ) {
-            if ( preg_match( '/' . $pattern . '/i', $normalized ) ) {
-                // Log the attempt for security monitoring
-                if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-                    // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
-                    error_log( '[RivianTrackr AI Search Summary] Blocked SQL injection attempt: ' . substr( $value, 0, 100 ) );
-                }
-                return true;
-            }
-        }
-
-        // Check for excessive special characters (sign of injection attempts)
-        $special_char_count = preg_match_all( '/[\'"\(\)\|\=\;\%]/', $value );
-        if ( $special_char_count > 10 ) {
-            return true;
-        }
-
-        return false;
+        return $this->input_validator->is_sql_injection_attempt( $value );
     }
 
     /**
@@ -4826,140 +4307,8 @@ class RivianTrackr_AI_Search_Summary {
      * @return bool True if spam pattern detected.
      */
     private function is_spam_query( string $value ): bool {
-        $normalized = strtolower( trim( $value ) );
-
-        // 1. URLs (http/https/www)
-        if ( preg_match( '#https?://|www\.#i', $normalized ) ) {
-            return true;
-        }
-
-        // 2. Email addresses
-        if ( preg_match( '/[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}/i', $normalized ) ) {
-            return true;
-        }
-
-        // 3. Phone numbers (7+ consecutive digits, optionally separated by dashes/spaces/dots)
-        $digits_only = preg_replace( '/[\s\-\.\(\)]+/', '', $normalized );
-        if ( preg_match( '/\d{7,}/', $digits_only ) ) {
-            return true;
-        }
-
-        // 4. Excessive character repetition (e.g., "aaaaaa", "123123123")
-        if ( preg_match( '/(.)\1{5,}/', $normalized ) ) {
-            return true;
-        }
-        // Repeated word/phrase patterns (e.g., "buy buy buy buy")
-        if ( preg_match( '/\b(\w+)\b(?:\s+\1\b){3,}/i', $normalized ) ) {
-            return true;
-        }
-
-        // 5. Common spam keywords/phrases
-        $spam_patterns = array(
-            'buy cheap',
-            'order now',
-            'free shipping',
-            'click here',
-            'act now',
-            'limited time offer',
-            'viagra',
-            'cialis',
-            'casino',
-            'poker online',
-            'slot machine',
-            'payday loan',
-            'earn money fast',
-            'work from home',
-            'make money online',
-            'weight loss',
-            'diet pill',
-            'enlargement',
-            'nigerian prince',
-            'cryptocurrency investment',
-            'binary option',
-            'forex trading',
-            'seo service',
-            'backlink',
-            'guest post service',
-            'telegram',
-            'whatsapp.*group',
-            'join.*channel',
-        );
-
-        foreach ( $spam_patterns as $pattern ) {
-            if ( preg_match( '/' . $pattern . '/i', $normalized ) ) {
-                if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-                    // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
-                    error_log( '[RivianTrackr AI Search Summary] Blocked spam query (pattern: ' . $pattern . '): ' . substr( $value, 0, 100 ) );
-                }
-                return true;
-            }
-        }
-
-        // 6. Server variable / vulnerability scanner probes
-        // Bots send CGI environment variable names to test if the site echoes them back.
-        $scanner_probes = array(
-            'QUERY_STRING',
-            'DOCUMENT_ROOT',
-            'SERVER_NAME',
-            'SERVER_ADDR',
-            'REMOTE_ADDR',
-            'REMOTE_HOST',
-            'HTTP_HOST',
-            'HTTP_USER_AGENT',
-            'HTTP_REFERER',
-            'HTTP_ACCEPT',
-            'PATH_INFO',
-            'SCRIPT_FILENAME',
-            'SCRIPT_NAME',
-            'PHP_SELF',
-            'REQUEST_URI',
-            'REQUEST_METHOD',
-            'CONTENT_TYPE',
-            'CONTENT_LENGTH',
-            'SERVER_SOFTWARE',
-            'SERVER_PROTOCOL',
-            'GATEWAY_INTERFACE',
-            'SERVER_PORT',
-            'PATH_TRANSLATED',
-            'AUTH_TYPE',
-        );
-        foreach ( $scanner_probes as $probe ) {
-            if ( stripos( $normalized, strtolower( $probe ) ) !== false ) {
-                if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-                    // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
-                    error_log( '[RivianTrackr AI Search Summary] Blocked scanner probe query (variable: ' . $probe . '): ' . substr( $value, 0, 100 ) );
-                }
-                return true;
-            }
-        }
-
-        // 7. High ratio of non-alphanumeric characters (gibberish)
-        $alpha_count = preg_match_all( '/[a-z0-9]/i', $value );
-        $total_len   = max( 1, strlen( $value ) );
-        if ( $total_len > 10 && ( $alpha_count / $total_len ) < 0.5 ) {
-            return true;
-        }
-
-        // 8. Admin-configurable blocklist
-        $options   = $this->get_options();
-        $blocklist = isset( $options['spam_blocklist'] ) ? $options['spam_blocklist'] : '';
-        if ( ! empty( $blocklist ) ) {
-            $blocked_terms = array_filter( array_map( 'trim', explode( "\n", strtolower( $blocklist ) ) ) );
-            foreach ( $blocked_terms as $term ) {
-                if ( empty( $term ) ) {
-                    continue;
-                }
-                if ( strpos( $normalized, $term ) !== false ) {
-                    if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-                        // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
-                        error_log( '[RivianTrackr AI Search Summary] Blocked query via blocklist (term: ' . $term . '): ' . substr( $value, 0, 100 ) );
-                    }
-                    return true;
-                }
-            }
-        }
-
-        return false;
+        $options = $this->get_options();
+        return $this->input_validator->is_spam_query( $value, $options );
     }
 
     /**
@@ -4973,51 +4322,8 @@ class RivianTrackr_AI_Search_Summary {
      * @return string Truncated text.
      */
 
-    private function safe_substr( string $text, int $start, int $length ): string {
-        if ( function_exists( 'mb_substr' ) ) {
-            return mb_substr( $text, $start, $length );
-        }
-        return substr( $text, $start, $length );
-    }
-    
     private function smart_truncate( string $text, int $limit ): string {
-        if ( empty( $text ) ) {
-            return '';
-        }
-
-        // Use safe_substr for multibyte support
-        if ( $this->safe_substr( $text, 0, $limit ) === $text ) {
-            // Text is already shorter than limit
-            return $text;
-        }
-
-        // Get text up to limit
-        $truncated = $this->safe_substr( $text, 0, $limit );
-
-        // Try to find last sentence ending (., !, ?)
-        $sentence_endings = array( '. ', '! ', '? ', '."', '!"', '?"', ".'", "!'", "?'" );
-        $last_sentence_pos = 0;
-
-        foreach ( $sentence_endings as $ending ) {
-            $pos = strrpos( $truncated, $ending );
-            if ( $pos !== false && $pos > $last_sentence_pos ) {
-                $last_sentence_pos = $pos + strlen( $ending );
-            }
-        }
-
-        // If we found a sentence ending and it's not too early (at least 50% of limit)
-        if ( $last_sentence_pos > 0 && $last_sentence_pos >= ( $limit * 0.5 ) ) {
-            return trim( $this->safe_substr( $truncated, 0, $last_sentence_pos ) );
-        }
-
-        // Fall back to word boundary
-        $last_space = strrpos( $truncated, ' ' );
-        if ( $last_space !== false && $last_space >= ( $limit * 0.7 ) ) {
-            return trim( $this->safe_substr( $truncated, 0, $last_space ) ) . '...';
-        }
-
-        // Last resort: hard cut with ellipsis
-        return $truncated . '...';
+        return $this->input_validator->smart_truncate( $text, $limit );
     }
 
     // Updated rest_get_summary() to use smart truncation
@@ -5171,22 +4477,7 @@ class RivianTrackr_AI_Search_Summary {
     private function is_rate_limited_for_ai_calls(): bool {
         $options = $this->get_options();
         $limit   = isset( $options['max_calls_per_minute'] ) ? (int) $options['max_calls_per_minute'] : 0;
-
-        if ( $limit <= 0 ) {
-            return false;
-        }
-
-        $key   = 'riviantrackr_rate_' . gmdate( 'YmdHi' );
-        $count = (int) get_transient( $key );
-
-        if ( $count >= $limit ) {
-            return true;
-        }
-
-        $count++;
-        set_transient( $key, $count, RIVIANTRACKR_RATE_LIMIT_WINDOW );
-
-        return false;
+        return $this->rate_limiter->is_ai_call_rate_limited( $limit );
     }
 
     private function get_ai_data_for_search( $search_query, $posts_for_ai, &$ai_error = '', &$cache_hit = null ) {
@@ -5195,39 +4486,28 @@ class RivianTrackr_AI_Search_Summary {
         $active_key = $this->get_active_api_key();
 
         if ( empty( $active_key ) || empty( $options['enable'] ) ) {
-            $ai_error = 'AI search is not configured. Please contact the site administrator.';
-            $cache_hit = null; // Not applicable - config error
+            $ai_error  = 'AI search is not configured. Please contact the site administrator.';
+            $cache_hit = null;
             return null;
         }
 
         $normalized_query = strtolower( trim( $search_query ) );
-        $namespace        = $this->get_cache_namespace();
+        $content_length   = isset( $options['content_length'] ) ? (int) $options['content_length'] : RIVIANTRACKR_CONTENT_LENGTH;
 
-        $content_length = isset( $options['content_length'] ) ? (int) $options['content_length'] : RIVIANTRACKR_CONTENT_LENGTH;
-        $cache_key_data = implode( '|', array(
+        $cache_key = $this->cache_manager->build_key(
             $provider,
             $options['model'],
-            $options['max_posts'],
+            (int) $options['max_posts'],
             $content_length,
             $normalized_query
-        ) );
+        );
 
-        $cache_key        = $this->cache_prefix . 'ns' . $namespace . '_' . hash( 'sha256', $cache_key_data );
-        $cached_raw       = get_transient( $cache_key );
-
-        if ( $cached_raw ) {
-            $ai_data = json_decode( $cached_raw, true );
-            if ( json_last_error() === JSON_ERROR_NONE && is_array( $ai_data ) ) {
-                $cache_hit = true;
-                return $ai_data;
-            }
-
-            // Corrupted cache entry — remove it so subsequent requests don't
-            // repeatedly attempt to decode the same bad data.
-            delete_transient( $cache_key );
+        $cached_data = $this->cache_manager->get( $cache_key );
+        if ( $cached_data !== null ) {
+            $cache_hit = true;
+            return $cached_data;
         }
 
-        // Cache miss - will make API call
         $cache_hit = false;
 
         if ( $this->is_rate_limited_for_ai_calls() ) {
@@ -5235,25 +4515,26 @@ class RivianTrackr_AI_Search_Summary {
             return null;
         }
 
-        // Route to the correct provider
+        // Route to the correct provider via the ApiHandler.
         if ( $provider === 'anthropic' ) {
-            $api_response = $this->call_anthropic_for_search(
+            $api_response = $this->api_handler->call_anthropic(
                 $active_key,
                 $options['model'],
                 $search_query,
-                $posts_for_ai
+                $posts_for_ai,
+                $options
             );
         } else {
-            $api_response = $this->call_openai_for_search(
+            $api_response = $this->api_handler->call_openai(
                 $active_key,
                 $options['model'],
                 $search_query,
-                $posts_for_ai
+                $posts_for_ai,
+                $options
             );
         }
 
         if ( isset( $api_response['error'] ) ) {
-            // Log detailed error for debugging, but show generic message to users
             if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
                 // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
                 error_log( '[RivianTrackr AI Search Summary] API error: ' . $api_response['error'] );
@@ -5262,649 +4543,54 @@ class RivianTrackr_AI_Search_Summary {
             return null;
         }
 
-        // Check for model refusal (newer models)
-        if ( ! empty( $api_response['choices'][0]['message']['refusal'] ) ) {
-            $ai_error = 'The AI model declined to answer this query.';
+        // Parse the AI content via the ApiHandler.
+        $decoded = $this->api_handler->parse_ai_content( $api_response, $ai_error );
+        if ( $decoded === null ) {
             return null;
         }
 
-        // Get content - check multiple possible locations
-        $raw_content = null;
-        if ( ! empty( $api_response['choices'][0]['message']['content'] ) ) {
-            $raw_content = $api_response['choices'][0]['message']['content'];
-        } elseif ( ! empty( $api_response['choices'][0]['text'] ) ) {
-            // Legacy completion format
-            $raw_content = $api_response['choices'][0]['text'];
-        } elseif ( ! empty( $api_response['output'] ) ) {
-            // Some newer models use 'output' field
-            $raw_content = is_array( $api_response['output'] )
-                ? wp_json_encode( $api_response['output'] )
-                : $api_response['output'];
-        }
-
-        if ( empty( $raw_content ) ) {
-            if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-                // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
-                error_log( '[RivianTrackr AI Search Summary] Empty response. Full API response: ' . wp_json_encode( $api_response ) );
-            }
-            // Check if there's a finish_reason that explains the empty response
-            $finish_reason = $api_response['choices'][0]['finish_reason'] ?? 'unknown';
-            // Log detailed reason for debugging
-            if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-                // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
-                error_log( '[RivianTrackr AI Search Summary] Empty response with finish_reason: ' . $finish_reason );
-            }
-            if ( $finish_reason === 'content_filter' ) {
-                $ai_error = 'The response was filtered by content policy. Please try a different search.';
-            } elseif ( $finish_reason === 'length' ) {
-                $ai_error = 'The response was truncated. Please try a simpler search.';
-            } else {
-                $ai_error = 'AI summary is not available for this search. Please try again.';
-            }
-            return null;
-        }
-
-        if ( is_array( $raw_content ) ) {
-            $decoded = $raw_content;
-        } else {
-            $decoded = json_decode( $raw_content, true );
-
-            if ( json_last_error() !== JSON_ERROR_NONE ) {
-                $first = strpos( $raw_content, '{' );
-                $last  = strrpos( $raw_content, '}' );
-                if ( $first !== false && $last !== false && $last > $first ) {
-                    $json_candidate = substr( $raw_content, $first, $last - $first + 1 );
-                    $decoded        = json_decode( $json_candidate, true );
-                }
-            }
-        }
-
-        if ( ! is_array( $decoded ) ) {
-            $ai_error = 'Could not parse AI response. The service may be experiencing issues.';
-            return null;
-        }
-
-        if ( isset( $decoded['answer_html'] ) && is_string( $decoded['answer_html'] ) ) {
-            $inner = trim( $decoded['answer_html'] );
-            if ( strlen( $inner ) > 0 && $inner[0] === '{' && strpos( $inner, '"answer_html"' ) !== false ) {
-                $inner_decoded = json_decode( $inner, true );
-                if ( json_last_error() === JSON_ERROR_NONE && is_array( $inner_decoded ) && isset( $inner_decoded['answer_html'] ) ) {
-                    $decoded = $inner_decoded;
-                }
-            }
-        }
-
-        if ( empty( $decoded['answer_html'] ) ) {
-            $decoded['answer_html'] = '<p>AI summary did not return a valid answer.</p>';
-        }
-
-        if ( empty( $decoded['results'] ) || ! is_array( $decoded['results'] ) ) {
-            $decoded['results'] = array();
-        }
-
-        $ttl_option = isset( $options['cache_ttl'] ) ? (int) $options['cache_ttl'] : 0;
-        $ttl        = $ttl_option > 0 ? $ttl_option : $this->cache_ttl;
-
-        set_transient( $cache_key, wp_json_encode( $decoded ), $ttl );
+        $ttl_option = isset( $options['cache_ttl'] ) ? (int) $options['cache_ttl'] : RIVIANTRACKR_DEFAULT_CACHE_TTL;
+        $this->cache_manager->set( $cache_key, $decoded, $ttl_option );
 
         return $decoded;
     }
 
     /**
      * Call the OpenAI API with retry logic for transient errors.
-     * Returns the decoded API response on success, or an array with 'error' key on failure.
-     * Includes '_retry_count' metadata when retries were needed.
+     *
+     * @deprecated 1.2.0 Use ApiHandler::call_openai() instead. Kept for backward compatibility.
      */
     private function call_openai_for_search( $api_key, $model, $user_query, $posts ) {
-        if ( empty( $api_key ) ) {
-            return array( 'error' => 'API key is missing. Please configure the plugin settings.' );
-        }
-
-        $endpoint = 'https://api.openai.com/v1/chat/completions';
-
-        $posts_text = '';
-        foreach ( $posts as $p ) {
-            $date = isset( $p['date'] ) ? $p['date'] : '';
-            $posts_text .= "ID: {$p['id']}\n";
-            $posts_text .= "Title: {$p['title']}\n";
-            $posts_text .= "URL: {$p['url']}\n";
-            $posts_text .= "Type: {$p['type']}\n";
-            if ( $date ) {
-                $posts_text .= "Published: {$date}\n";
-            }
-            $posts_text .= "Content: {$p['content']}\n";
-            $posts_text .= "-----\n";
-        }
-
-        // Get site configuration for the prompt
         $options = $this->get_options();
-        $site_name = ! empty( $options['site_name'] ) ? $options['site_name'] : get_bloginfo( 'name' );
-        $site_desc = ! empty( $options['site_description'] ) ? ', ' . $options['site_description'] : '';
-
-        $system_message = "You are the AI-powered search assistant built into {$site_name}{$site_desc}.
-    You are part of the {$site_name} platform — users are reading your answers directly on the site. Speak as {$site_name}'s search assistant, not as a generic external AI.
-    Use the provided posts as your entire knowledge base.
-    Answer the user query based only on these posts.
-    When referencing information, naturally attribute it to {$site_name} coverage (e.g. \"Based on {$site_name}'s reporting...\", \"As covered on {$site_name}...\", \"{$site_name} reported that...\"). Do not over-attribute — one or two natural references per answer is enough.
-    Prefer newer posts over older ones when there is conflicting or overlapping information, especially for news, software updates, or product changes.
-    If something is not covered, say that {$site_name} does not have that information yet instead of making something up.
-
-    IMPORTANT: This is a one-way search interface - users cannot reply or provide clarification. Never ask follow-up questions, never ask the user to clarify, and never suggest they tell you more. Instead, provide the most comprehensive answer possible covering all likely interpretations of their query. If a query is ambiguous, briefly cover the most relevant possibilities.
-
-    Always respond as a single JSON object using this structure:
-    {
-      \"answer_html\": \"HTML formatted summary answer for the user\",
-      \"results\": [
-         {
-           \"id\": 123,
-           \"title\": \"Post title\",
-           \"url\": \"https://...\",
-           \"excerpt\": \"Short snippet\",
-           \"type\": \"post or page\"
-         }
-      ]
-    }
-
-    The results array should list up to 5 of the most relevant posts you used when creating the summary, so they can be shown as sources under the answer.";
-
-        $user_message  = "User search query: {$user_query}\n\n";
-        $user_message .= "Here are the posts from the site (with newer posts listed first where possible):\n\n{$posts_text}";
-
-        // Determine model capabilities
-        $is_reasoning = self::is_reasoning_model( $model );
-
-        // GPT-4o and GPT-4.1 support json_object response format
-        // Reasoning models may have different requirements
-        $supports_response_format = (
-            strpos( $model, 'gpt-4o' ) === 0 ||
-            strpos( $model, 'gpt-4.1' ) === 0
-        );
-
-        $body = array(
-            'model'    => $model,
-            'messages' => array(
-                array(
-                    'role'    => 'system',
-                    'content' => $system_message,
-                ),
-                array(
-                    'role'    => 'user',
-                    'content' => $user_message,
-                ),
-            ),
-        );
-
-        // Use the admin-configured max tokens setting
-        $configured_tokens = isset( $options['max_tokens'] ) ? (int) $options['max_tokens'] : RIVIANTRACKR_MAX_TOKENS;
-
-        // Reasoning models use max_completion_tokens and need a higher limit
-        // to leave room for hidden reasoning tokens
-        if ( $is_reasoning ) {
-            $body['max_completion_tokens'] = max( $configured_tokens, 16000 );
-        } else {
-            $body['max_tokens'] = $configured_tokens;
-        }
-
-        // Reasoning models don't support temperature
-        if ( ! $is_reasoning ) {
-            $body['temperature'] = 0.2;
-        }
-
-        if ( $supports_response_format ) {
-            $body['response_format'] = array( 'type' => 'json_object' );
-        }
-
-        $args = array(
-            'headers' => array(
-                'Authorization' => 'Bearer ' . $api_key,
-                'Content-Type'  => 'application/json',
-            ),
-            'body'    => wp_json_encode( $body ),
-            'timeout' => isset( $options['request_timeout'] ) ? (int) $options['request_timeout'] : RIVIANTRACKR_API_TIMEOUT,
-        );
-
-        // Retry logic: attempt up to 3 times with exponential backoff for transient errors
-        $max_retries = 2; // 2 retries = 3 total attempts
-        $attempt = 0;
-        $last_error = null;
-
-        while ( $attempt <= $max_retries ) {
-            $result = $this->make_openai_request( $endpoint, $args );
-
-            // Success - return the decoded response with retry metadata
-            if ( isset( $result['success'] ) && $result['success'] ) {
-                $data = $result['data'];
-                if ( $attempt > 0 ) {
-                    $data['_retry_count'] = $attempt;
-                    if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-                        // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
-                        error_log( '[RivianTrackr AI Search Summary] Request succeeded after ' . $attempt . ' retry(ies)' );
-                    }
-                }
-                return $data;
-            }
-
-            // Check if error is retryable
-            $is_retryable = isset( $result['retryable'] ) && $result['retryable'];
-            $last_error = $result;
-
-            if ( ! $is_retryable || $attempt >= $max_retries ) {
-                // Non-retryable error or max retries reached
-                break;
-            }
-
-            // Exponential backoff: 1s, 2s
-            $delay = pow( 2, $attempt );
-            sleep( $delay );
-
-            $attempt++;
-
-            if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-                // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
-                error_log( '[RivianTrackr AI Search Summary] Retry attempt ' . ( $attempt + 1 ) . ' after ' . $delay . 's delay' );
-            }
-        }
-
-        // Return the last error with retry metadata
-        $error_msg = $last_error['error'] ?? 'Unknown error occurred.';
-        if ( $attempt > 0 ) {
-            $error_msg .= ' (after ' . ( $attempt + 1 ) . ' attempts)';
-        }
-        return array( 'error' => $error_msg );
-    }
-
-    /**
-     * Make the actual HTTP request to OpenAI.
-     * Returns array with 'success', 'data'/'error', and 'retryable' flag.
-     */
-    private function make_openai_request( $endpoint, $args ) {
-        $response = wp_safe_remote_post( $endpoint, $args );
-
-        // Connection/network errors
-        if ( is_wp_error( $response ) ) {
-            $error_msg = $response->get_error_message();
-            if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-                // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
-                error_log( '[RivianTrackr AI Search Summary] API request error: ' . $error_msg );
-            }
-
-            // Timeouts and connection errors are retryable
-            $is_timeout = strpos( $error_msg, 'cURL error 28' ) !== false || strpos( $error_msg, 'timed out' ) !== false;
-            $is_connection = strpos( $error_msg, 'cURL error 6' ) !== false || strpos( $error_msg, 'resolve host' ) !== false;
-
-            if ( $is_timeout ) {
-                return array(
-                    'success'   => false,
-                    'error'     => 'Request timed out. The AI service may be slow right now. Please try again.',
-                    'retryable' => true,
-                );
-            }
-            if ( $is_connection ) {
-                return array(
-                    'success'   => false,
-                    'error'     => 'Could not connect to AI service. Please check your internet connection.',
-                    'retryable' => true,
-                );
-            }
-
-            // Generic message - detailed error already logged above
-            return array(
-                'success'   => false,
-                'error'     => 'Could not connect to AI service. Please try again.',
-                'retryable' => true, // Most connection errors are worth retrying
-            );
-        }
-
-        $code = wp_remote_retrieve_response_code( $response );
-        $body = wp_remote_retrieve_body( $response );
-
-        // HTTP errors
-        if ( $code < 200 || $code >= 300 ) {
-            if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-                // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
-                error_log( '[RivianTrackr AI Search Summary] API HTTP error ' . $code . ' body: ' . $body );
-            }
-
-            $decoded_error = json_decode( $body, true );
-            $api_error = isset( $decoded_error['error']['message'] ) ? $decoded_error['error']['message'] : null;
-
-            // 429 Rate limit - retryable
-            if ( $code === 429 ) {
-                return array(
-                    'success'   => false,
-                    'error'     => 'OpenAI rate limit exceeded. Please try again in a few moments.',
-                    'retryable' => true,
-                );
-            }
-
-            // 5xx Server errors - retryable
-            if ( $code >= 500 && $code < 600 ) {
-                return array(
-                    'success'   => false,
-                    'error'     => 'OpenAI service temporarily unavailable. Please try again later.',
-                    'retryable' => true,
-                );
-            }
-
-            // 401 Invalid API key - NOT retryable
-            if ( $code === 401 ) {
-                return array(
-                    'success'   => false,
-                    'error'     => 'Invalid API key. Please check your plugin settings.',
-                    'retryable' => false,
-                );
-            }
-
-            // 400 Bad request - NOT retryable
-            if ( $code === 400 ) {
-                return array(
-                    'success'   => false,
-                    'error'     => 'The request could not be processed. Please try a different search.',
-                    'retryable' => false,
-                );
-            }
-
-            // Other errors - details already logged above
-            return array(
-                'success'   => false,
-                'error'     => 'AI service error. Please try again later.',
-                'retryable' => false,
-            );
-        }
-
-        // Parse JSON response
-        $decoded = json_decode( $body, true );
-
-        if ( json_last_error() !== JSON_ERROR_NONE ) {
-            if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-                // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
-                error_log( '[RivianTrackr AI Search Summary] Failed to decode OpenAI response: ' . json_last_error_msg() );
-            }
-            return array(
-                'success'   => false,
-                'error'     => 'Could not understand AI response. Please try again.',
-                'retryable' => true, // Malformed responses might be transient
-            );
-        }
-
-        // Success
-        return array(
-            'success' => true,
-            'data'    => $decoded,
-        );
+        return $this->api_handler->call_openai( (string) $api_key, (string) $model, (string) $user_query, $posts, $options );
     }
 
     /**
      * Call the Anthropic Claude API with retry logic for transient errors.
-     * Returns the decoded API response normalized to OpenAI-compatible format,
-     * or an array with 'error' key on failure.
+     *
+     * @deprecated 1.2.0 Use ApiHandler::call_anthropic() instead. Kept for backward compatibility.
      */
     private function call_anthropic_for_search( $api_key, $model, $user_query, $posts ) {
-        if ( empty( $api_key ) ) {
-            return array( 'error' => 'API key is missing. Please configure the plugin settings.' );
-        }
-
-        $endpoint = 'https://api.anthropic.com/v1/messages';
-
-        $posts_text = '';
-        foreach ( $posts as $p ) {
-            $date = isset( $p['date'] ) ? $p['date'] : '';
-            $posts_text .= "ID: {$p['id']}\n";
-            $posts_text .= "Title: {$p['title']}\n";
-            $posts_text .= "URL: {$p['url']}\n";
-            $posts_text .= "Type: {$p['type']}\n";
-            if ( $date ) {
-                $posts_text .= "Published: {$date}\n";
-            }
-            $posts_text .= "Content: {$p['content']}\n";
-            $posts_text .= "-----\n";
-        }
-
-        $options   = $this->get_options();
-        $site_name = ! empty( $options['site_name'] ) ? $options['site_name'] : get_bloginfo( 'name' );
-        $site_desc = ! empty( $options['site_description'] ) ? ', ' . $options['site_description'] : '';
-
-        $system_message = "You are the AI-powered search assistant built into {$site_name}{$site_desc}.
-    You are part of the {$site_name} platform — users are reading your answers directly on the site. Speak as {$site_name}'s search assistant, not as a generic external AI.
-    Use the provided posts as your entire knowledge base.
-    Answer the user query based only on these posts.
-    When referencing information, naturally attribute it to {$site_name} coverage (e.g. \"Based on {$site_name}'s reporting...\", \"As covered on {$site_name}...\", \"{$site_name} reported that...\"). Do not over-attribute — one or two natural references per answer is enough.
-    Prefer newer posts over older ones when there is conflicting or overlapping information, especially for news, software updates, or product changes.
-    If something is not covered, say that {$site_name} does not have that information yet instead of making something up.
-
-    IMPORTANT: This is a one-way search interface - users cannot reply or provide clarification. Never ask follow-up questions, never ask the user to clarify, and never suggest they tell you more. Instead, provide the most comprehensive answer possible covering all likely interpretations of their query. If a query is ambiguous, briefly cover the most relevant possibilities.
-
-    Always respond as a single JSON object using this structure:
-    {
-      \"answer_html\": \"HTML formatted summary answer for the user\",
-      \"results\": [
-         {
-           \"id\": 123,
-           \"title\": \"Post title\",
-           \"url\": \"https://...\",
-           \"excerpt\": \"Short snippet\",
-           \"type\": \"post or page\"
-         }
-      ]
+        $options = $this->get_options();
+        return $this->api_handler->call_anthropic( (string) $api_key, (string) $model, (string) $user_query, $posts, $options );
     }
 
-    The results array should list up to 5 of the most relevant posts you used when creating the summary, so they can be shown as sources under the answer.";
+    /* The following legacy code has been moved to includes/class-api-handler.php.
+       The original methods (make_openai_request, make_anthropic_request) and their
+       full implementation (OpenAI prompt construction, Anthropic normalization,
+       retry logic, HTTP error handling) now live in the ApiHandler class.
 
-        $user_message  = "User search query: {$user_query}\n\n";
-        $user_message .= "Here are the posts from the site (with newer posts listed first where possible):\n\n{$posts_text}";
+       --- REMOVED LEGACY CODE START --- */
 
-        $configured_tokens = isset( $options['max_tokens'] ) ? (int) $options['max_tokens'] : RIVIANTRACKR_MAX_TOKENS;
+    // This block intentionally left empty to mark where the old code was.
+    // It previously contained: call_openai_for_search body, make_openai_request,
+    // call_anthropic_for_search, make_anthropic_request (~550 lines total).
 
-        $body = array(
-            'model'      => $model,
-            'max_tokens' => $configured_tokens,
-            'system'     => $system_message,
-            'messages'   => array(
-                array(
-                    'role'    => 'user',
-                    'content' => $user_message,
-                ),
-            ),
-        );
+    /* --- REMOVED LEGACY CODE END --- */
 
-        $args = array(
-            'headers' => array(
-                'x-api-key'        => $api_key,
-                'anthropic-version' => RIVIANTRACKR_ANTHROPIC_API_VERSION,
-                'Content-Type'     => 'application/json',
-            ),
-            'body'    => wp_json_encode( $body ),
-            'timeout' => isset( $options['request_timeout'] ) ? (int) $options['request_timeout'] : RIVIANTRACKR_API_TIMEOUT,
-        );
-
-        // Retry logic: attempt up to 3 times with exponential backoff for transient errors
-        $max_retries = 2;
-        $attempt     = 0;
-        $last_error  = null;
-
-        while ( $attempt <= $max_retries ) {
-            $result = $this->make_anthropic_request( $endpoint, $args );
-
-            if ( isset( $result['success'] ) && $result['success'] ) {
-                $api_data = $result['data'];
-
-                // Normalize Anthropic response to OpenAI-compatible format
-                $content_text = '';
-                if ( ! empty( $api_data['content'] ) && is_array( $api_data['content'] ) ) {
-                    foreach ( $api_data['content'] as $block ) {
-                        if ( isset( $block['type'] ) && $block['type'] === 'text' && isset( $block['text'] ) ) {
-                            $content_text .= $block['text'];
-                        }
-                    }
-                }
-
-                $stop_reason  = isset( $api_data['stop_reason'] ) ? $api_data['stop_reason'] : 'end_turn';
-                $finish_reason = 'stop';
-                if ( $stop_reason === 'max_tokens' ) {
-                    $finish_reason = 'length';
-                }
-
-                $normalized = array(
-                    'choices' => array(
-                        array(
-                            'message' => array(
-                                'content' => $content_text,
-                                'refusal' => null,
-                            ),
-                            'finish_reason' => $finish_reason,
-                        ),
-                    ),
-                );
-
-                if ( $attempt > 0 ) {
-                    $normalized['_retry_count'] = $attempt;
-                    if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-                        // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
-                        error_log( '[RivianTrackr AI Search Summary] Anthropic request succeeded after ' . $attempt . ' retry(ies)' );
-                    }
-                }
-                return $normalized;
-            }
-
-            $is_retryable = isset( $result['retryable'] ) && $result['retryable'];
-            $last_error   = $result;
-
-            if ( ! $is_retryable || $attempt >= $max_retries ) {
-                break;
-            }
-
-            $delay = pow( 2, $attempt );
-            sleep( $delay );
-            $attempt++;
-
-            if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-                // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
-                error_log( '[RivianTrackr AI Search Summary] Anthropic retry attempt ' . ( $attempt + 1 ) . ' after ' . $delay . 's delay' );
-            }
-        }
-
-        $error_msg = $last_error['error'] ?? 'Unknown error occurred.';
-        if ( $attempt > 0 ) {
-            $error_msg .= ' (after ' . ( $attempt + 1 ) . ' attempts)';
-        }
-        return array( 'error' => $error_msg );
-    }
-
-    /**
-     * Make the actual HTTP request to Anthropic.
-     * Returns array with 'success', 'data'/'error', and 'retryable' flag.
-     */
-    private function make_anthropic_request( $endpoint, $args ) {
-        $response = wp_safe_remote_post( $endpoint, $args );
-
-        if ( is_wp_error( $response ) ) {
-            $error_msg = $response->get_error_message();
-            if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-                // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
-                error_log( '[RivianTrackr AI Search Summary] Anthropic API request error: ' . $error_msg );
-            }
-
-            $is_timeout    = strpos( $error_msg, 'cURL error 28' ) !== false || strpos( $error_msg, 'timed out' ) !== false;
-            $is_connection = strpos( $error_msg, 'cURL error 6' ) !== false || strpos( $error_msg, 'resolve host' ) !== false;
-
-            if ( $is_timeout ) {
-                return array(
-                    'success'   => false,
-                    'error'     => 'Request timed out. The AI service may be slow right now. Please try again.',
-                    'retryable' => true,
-                );
-            }
-            if ( $is_connection ) {
-                return array(
-                    'success'   => false,
-                    'error'     => 'Could not connect to AI service. Please check your internet connection.',
-                    'retryable' => true,
-                );
-            }
-
-            return array(
-                'success'   => false,
-                'error'     => 'Could not connect to AI service. Please try again.',
-                'retryable' => true,
-            );
-        }
-
-        $code = wp_remote_retrieve_response_code( $response );
-        $body = wp_remote_retrieve_body( $response );
-
-        if ( $code < 200 || $code >= 300 ) {
-            if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-                // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
-                error_log( '[RivianTrackr AI Search Summary] Anthropic HTTP error ' . $code . ' body: ' . $body );
-            }
-
-            if ( $code === 429 ) {
-                return array(
-                    'success'   => false,
-                    'error'     => 'Anthropic rate limit exceeded. Please try again in a few moments.',
-                    'retryable' => true,
-                );
-            }
-
-            if ( $code >= 500 && $code < 600 ) {
-                return array(
-                    'success'   => false,
-                    'error'     => 'Anthropic service temporarily unavailable. Please try again later.',
-                    'retryable' => true,
-                );
-            }
-
-            if ( $code === 529 ) {
-                return array(
-                    'success'   => false,
-                    'error'     => 'Anthropic API is temporarily overloaded. Please try again later.',
-                    'retryable' => true,
-                );
-            }
-
-            if ( $code === 401 ) {
-                return array(
-                    'success'   => false,
-                    'error'     => 'Invalid Anthropic API key. Please check your plugin settings.',
-                    'retryable' => false,
-                );
-            }
-
-            if ( $code === 400 ) {
-                return array(
-                    'success'   => false,
-                    'error'     => 'The request could not be processed. Please try a different search.',
-                    'retryable' => false,
-                );
-            }
-
-            return array(
-                'success'   => false,
-                'error'     => 'AI service error. Please try again later.',
-                'retryable' => false,
-            );
-        }
-
-        $decoded = json_decode( $body, true );
-
-        if ( json_last_error() !== JSON_ERROR_NONE ) {
-            if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-                // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
-                error_log( '[RivianTrackr AI Search Summary] Failed to decode Anthropic response: ' . json_last_error_msg() );
-            }
-            return array(
-                'success'   => false,
-                'error'     => 'Could not understand AI response. Please try again.',
-                'retryable' => true,
-            );
-        }
-
-        return array(
-            'success' => true,
-            'data'    => $decoded,
-        );
-    }
-
+    /* Legacy API methods removed in 1.2.0. See includes/class-api-handler.php.
+       call_openai_for_search, make_openai_request, call_anthropic_for_search,
+       make_anthropic_request have been extracted to ApiHandler. */
     private function render_sources_html( array $sources ): string {
         if ( empty( $sources ) || ! is_array( $sources ) ) {
             return '';
@@ -6000,35 +4686,7 @@ class RivianTrackr_AI_Search_Summary {
      * @return array Array of trending keywords with counts.
      */
     public function get_trending_keywords( $limit = 5, $time_period = 24, $time_unit = 'hours' ) {
-        if ( ! $this->logs_table_is_available() ) {
-            return array();
-        }
-
-        global $wpdb;
-        $table_name = self::get_logs_table_name();
-
-        // Calculate seconds based on time unit
-        $seconds = ( 'days' === $time_unit ) ? $time_period * DAY_IN_SECONDS : $time_period * HOUR_IN_SECONDS;
-        $since   = gmdate( 'Y-m-d H:i:s', time() - $seconds );
-
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-        $results = $wpdb->get_results(
-            $wpdb->prepare(
-                'SELECT search_query, COUNT(*) AS search_count
-                 FROM %i
-                 WHERE created_at >= %s
-                   AND results_count > 0
-                   AND ai_success = 1
-                 GROUP BY search_query
-                 ORDER BY search_count DESC
-                 LIMIT %d',
-                $table_name,
-                $since,
-                $limit
-            )
-        );
-
-        return $results ? $results : array();
+        return $this->analytics->get_trending_keywords( (int) $limit, (int) $time_period, (string) $time_unit );
     }
 
     /**
