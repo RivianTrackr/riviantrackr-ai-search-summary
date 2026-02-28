@@ -5,6 +5,26 @@ All notable changes to RivianTrackr AI Search Summary will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-02-28
+
+### Added
+
+- **PHP namespaces** — All extracted classes are namespaced under `RivianTrackr\AISearchSummary` with a PSR-4 style autoloader (`includes/class-autoloader.php`). This prevents class name collisions and aligns with modern PHP standards.
+- **PHPUnit test suite** — 87 unit tests covering SQL injection detection, spam filtering, custom CSS sanitization, text truncation, API content parsing, cache key generation, reasoning model detection, prompt building, and autoloader resolution. Tests run without a full WordPress environment using lightweight function stubs.
+
+### Changed
+
+- **Architecture: Monolithic file split into focused classes** — The 6,300-line main plugin file has been refactored into five dedicated component classes:
+  - `includes/class-api-handler.php` — OpenAI and Anthropic API communication, prompt construction, retry logic with exponential backoff, response normalization, and content parsing.
+  - `includes/class-cache-manager.php` — Server-side transient caching, namespace-based invalidation, cache key generation, and OpenAI model list caching.
+  - `includes/class-rate-limiter.php` — IP-based rate limiting with atomic locking, global AI call rate limiting, bot detection heuristics, JS challenge token validation, and client IP resolution.
+  - `includes/class-analytics.php` — Search event logging, user feedback recording, log purging, feedback statistics, success rate calculation, and trending keyword queries.
+  - `includes/class-input-validator.php` — Search query validation, SQL injection pattern detection, spam/scanner probe filtering, custom CSS sanitization (XSS prevention), and smart text truncation.
+- **Main plugin file delegates to components** — All extracted logic in the main `RivianTrackr_AI_Search_Summary` class now delegates to the namespaced component classes. Hooks, admin UI rendering, and WordPress integration remain in the main class.
+- **Version bumped to 1.2.0** — First minor release with architectural improvements and test coverage.
+
+---
+
 ## [1.1.0.3] - 2026-02-28
 
 ### Improved
