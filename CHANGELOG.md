@@ -5,6 +5,14 @@ All notable changes to RivianTrackr AI Search Summary will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.2] - 2026-03-01
+
+### Fixed
+
+- **Server-side no-results logging now validates input** — The `log_no_results_search()` method (hooked on `template_redirect`) previously logged every zero-result search query directly to the database with no validation. Bots could pollute analytics simply by requesting `/?s=junk` without ever executing JavaScript, completely bypassing all REST endpoint protections (bot detection, spam filtering, off-topic checks, rate limiting). The method now applies bot detection via `is_likely_bot()`, input validation via `validate_search_query()` (covers SQL injection, spam patterns, blocklist, length limits), and `is_off_topic_query()` before logging — matching the same checks enforced on the REST API summary endpoint.
+
+---
+
 ## [1.3.1] - 2026-03-01
 
 ### Added

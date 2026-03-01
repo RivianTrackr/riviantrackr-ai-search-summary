@@ -4,7 +4,7 @@ Tags: search, ai, openai, anthropic, claude, summary, chatgpt
 Requires at least: 6.9
 Tested up to: 6.9
 Requires PHP: 8.4
-Stable tag: 1.3.1
+Stable tag: 1.3.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -175,6 +175,9 @@ The plugin is designed with privacy in mind:
 
 == Changelog ==
 
+= 1.3.2 =
+* Fixed: Server-side no-results logging now applies bot detection, spam filtering, and off-topic checks — previously bots could pollute analytics by hitting /?s=junk without executing JavaScript
+
 = 1.3.1 =
 * Added: Relevance Keywords setting — define your site's topics to automatically block unrelated searches (e.g. "costco credit card", "msi monitor") from cluttering analytics
 * Added: Off-topic query filter with configurable keywords (comma or newline separated, case-insensitive)
@@ -303,6 +306,9 @@ The plugin is designed with privacy in mind:
 * Security headers and prepared statements
 
 == Upgrade Notice ==
+
+= 1.3.2 =
+Closes the server-side logging gap that allowed bots to pollute analytics by requesting /?s=junk directly. No-results searches now go through the same bot detection, spam filtering, and off-topic checks as the REST API endpoint.
 
 = 1.3.1 =
 Off-topic query filtering: configure Relevance Keywords in Settings to block unrelated searches from cluttering your analytics. Leave empty to keep existing behavior (all queries allowed).
