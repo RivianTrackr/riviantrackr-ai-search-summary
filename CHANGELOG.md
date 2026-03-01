@@ -5,6 +5,17 @@ All notable changes to RivianTrackr AI Search Summary will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - 2026-03-01
+
+### Added
+
+- **Relevance Keywords (off-topic filter)** — New admin setting that lets you define the topics your site covers (e.g. "rivian, r1t, r1s, ev, electric vehicle"). Search queries that don't match any keyword are rejected early with a friendly message, preventing completely unrelated searches (e.g. "costco credit card", "msi monitor amazon portugal") from cluttering analytics and wasting server resources. Comma or newline separated, case-insensitive. Leave empty to allow all queries (backwards compatible).
+- **`RIVIANTRACKR_ERROR_OFF_TOPIC` error code** — New error code returned when a query is blocked by the relevance filter, enabling frontend-specific handling.
+- **`InputValidator::is_off_topic_query()` method** — Checks queries against configured relevance keywords using both substring and exact word matching.
+- **12 unit tests** for off-topic detection covering keyword matching, case insensitivity, comma/newline separators, empty configuration, and various junk query patterns.
+
+---
+
 ## [1.3.0] - 2026-03-01
 
 ### Added
