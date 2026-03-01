@@ -176,7 +176,9 @@ The plugin is designed with privacy in mind:
 == Changelog ==
 
 = 1.3.4 =
-* Fixed: Session cache hit endpoint (/log-session-hit) now applies off-topic filtering — previously any query could be logged to analytics via this endpoint
+* Fixed: Automatic one-time cleanup of old off-topic entries from analytics on upgrade — removes junk logged before the filter existed
+* Fixed: "Scan & Remove Spam" button now also purges off-topic queries (based on Relevance Keywords)
+* Fixed: Session cache hit endpoint (/log-session-hit) now applies off-topic filtering
 * Fixed: Off-topic error responses are now cached in the browser so repeat searches don't re-hit the server
 * Fixed: Cached off-topic responses no longer trigger session cache hit logging
 

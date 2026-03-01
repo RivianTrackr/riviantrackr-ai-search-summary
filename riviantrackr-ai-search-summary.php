@@ -101,6 +101,7 @@ class RivianTrackr_AI_Search_Summary {
 
         // Register settings on admin_init (the recommended hook for Settings API)
         add_action( 'admin_init', array( $this, 'register_settings' ) );
+        add_action( 'admin_init', array( $this, 'maybe_run_upgrade' ) );
 
         add_action( 'admin_init', array( $this, 'add_security_headers' ) );
         add_action( 'admin_menu', array( $this, 'add_settings_page' ) );
@@ -356,6 +357,75 @@ class RivianTrackr_AI_Search_Summary {
         $timestamp = wp_next_scheduled( 'riviantrackr_daily_log_purge' );
         if ( $timestamp ) {
             wp_unschedule_event( $timestamp, 'riviantrackr_daily_log_purge' );
+        }
+    }
+
+    /**
+     * Run one-time upgrade tasks when the plugin version changes.
+     */
+    public function maybe_run_upgrade() {
+        $stored_version = get_option( 'riviantrackr_version', '0' );
+        if ( version_compare( $stored_version, RIVIANTRACKR_VERSION, '>=' ) ) {
+            return;
+        }
+
+        // 1.3.4: Purge old off-topic entries that were logged before the filter existed.
+        if ( version_compare( $stored_version, '1.3.4', '<' ) ) {
+            $this->purge_off_topic_logs();
+        }
+
+        update_option( 'riviantrackr_version', RIVIANTRACKR_VERSION );
+    }
+
+    /**
+     * Delete log and feedback entries whose search query would now be blocked
+     * by the off-topic relevance filter.  Runs once on upgrade and can also
+     * be triggered via the "Scan & Remove Spam" button.
+     */
+    private function purge_off_topic_logs() {
+        if ( ! $this->logs_table_is_available() ) {
+            return;
+        }
+
+        $options = $this->get_options();
+        $keywords_raw = isset( $options['relevance_keywords'] ) ? $options['relevance_keywords'] : '';
+        if ( empty( trim( $keywords_raw ) ) ) {
+            return; // No keywords configured — nothing to purge.
+        }
+
+        global $wpdb;
+        $table_name     = self::get_logs_table_name();
+        $feedback_table = self::get_feedback_table_name();
+
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+        $queries = $wpdb->get_col(
+            $wpdb->prepare( 'SELECT DISTINCT search_query FROM %i', $table_name )
+        );
+
+        if ( empty( $queries ) ) {
+            return;
+        }
+
+        $deleted = 0;
+        foreach ( $queries as $query ) {
+            if ( ! $this->input_validator->is_off_topic_query( $query, $options ) ) {
+                continue;
+            }
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+            $rows = $wpdb->query(
+                $wpdb->prepare( 'DELETE FROM %i WHERE search_query = %s', $table_name, $query )
+            );
+            if ( is_int( $rows ) ) {
+                $deleted += $rows;
+            }
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+            $wpdb->query(
+                $wpdb->prepare( 'DELETE FROM %i WHERE search_query = %s', $feedback_table, $query )
+            );
+        }
+
+        if ( $deleted > 0 ) {
+            delete_transient( 'riviantrackr_analytics_overview' );
         }
     }
 
@@ -1238,9 +1308,10 @@ class RivianTrackr_AI_Search_Summary {
             ) );
         }
 
+        $options      = $this->get_options();
         $spam_queries = array();
         foreach ( $queries as $query ) {
-            if ( $this->is_spam_query( $query ) || $this->is_sql_injection_attempt( $query ) ) {
+            if ( $this->is_spam_query( $query ) || $this->is_sql_injection_attempt( $query ) || $this->input_validator->is_off_topic_query( $query, $options ) ) {
                 $spam_queries[] = $query;
             }
         }
@@ -3456,7 +3527,7 @@ class RivianTrackr_AI_Search_Summary {
                         <label>Spam Cleanup</label>
                     </div>
                     <div class="riviantrackr-field-description">
-                        Scan log entries for spam patterns (URLs, emails, phone numbers, known spam keywords, and your blocklist) and remove them.
+                        Scan log entries for spam patterns (URLs, emails, phone numbers, known spam keywords, your blocklist) and off-topic queries (based on your Relevance Keywords) and remove them.
                     </div>
                     <div style="margin-top: 12px; display: flex; align-items: center; gap: 12px;">
                         <button type="button" id="riviantrackr-purge-spam-btn"
