@@ -4,7 +4,7 @@ Tags: search, ai, openai, anthropic, claude, summary, chatgpt
 Requires at least: 6.9
 Tested up to: 6.9
 Requires PHP: 8.4
-Stable tag: 1.1.0.3
+Stable tag: 1.3.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -175,6 +175,14 @@ The plugin is designed with privacy in mind:
 
 == Changelog ==
 
+= 1.3.0 =
+* Security: Progressive IP penalties — repeat rate-limit offenders face escalating bans (5min, 30min, 24hr) instead of a 60-second reset
+* Security: JS challenge token now mandatory by default — bots can no longer bypass by omitting the token parameters
+* Security: Honeypot field added to search widget — auto-filling bots are instantly rejected
+* Added: Duplicate query throttling — same query from same IP blocked for 5 minutes to prevent API hammering
+* Added: "Require JavaScript Challenge" admin toggle in Settings (enabled by default)
+* Added: RateLimiter unit test suite (27 tests)
+
 = 1.1.0.3 =
 * Improved: AI prompts now instruct the model to identify as the site's built-in search assistant, naturally attributing information to the site's coverage and using the site name in fallback messages
 
@@ -289,6 +297,9 @@ The plugin is designed with privacy in mind:
 * Security headers and prepared statements
 
 == Upgrade Notice ==
+
+= 1.3.0 =
+Spam prevention release: progressive IP bans for repeat offenders, mandatory JS challenge token (configurable), honeypot bot trap, and duplicate query throttling. The "Require JavaScript Challenge" setting defaults to enabled — disable it in Settings only if you have custom API integrations.
 
 = 1.1.0.3 =
 AI summaries now feel native to your site — the AI identifies as your site's search assistant and naturally references your site's coverage in responses.
