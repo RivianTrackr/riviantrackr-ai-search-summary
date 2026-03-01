@@ -544,7 +544,6 @@ class RivianTrackr_AI_Search_Summary {
             'anonymize_queries'       => 0,
             'spam_blocklist'          => '',
             'relevance_keywords'      => '',
-            'skip_zero_results_logging' => 0,
             'require_bot_token'       => 1,
             'post_types'              => array(),
             'max_sources_display'     => RIVIANTRACKR_MAX_SOURCES_DISPLAY,
@@ -734,9 +733,6 @@ class RivianTrackr_AI_Search_Summary {
         } else {
             $output['relevance_keywords'] = '';
         }
-
-        // Skip logging zero-result searches (they are almost always spam/noise)
-        $output['skip_zero_results_logging'] = isset( $input['skip_zero_results_logging'] ) && $input['skip_zero_results_logging'] ? 1 : 0;
 
         // Require JS challenge token for bot prevention
         $output['require_bot_token'] = isset( $input['require_bot_token'] ) && $input['require_bot_token'] ? 1 : 0;
@@ -1015,7 +1011,6 @@ class RivianTrackr_AI_Search_Summary {
                     'auto_purge_days'      => 90,
                     'preserve_data_on_uninstall' => 0,
                     'anonymize_queries'    => 0,
-                    'skip_zero_results_logging' => 0,
                     'post_types'           => array(),
                     'max_sources_display'  => 5,
                     'content_length'       => 400,
@@ -1356,41 +1351,12 @@ class RivianTrackr_AI_Search_Summary {
             );
         }
 
-        // When skip-zero-results logging is on, also purge existing zero-result
-        // entries — these are overwhelmingly spam that was logged before the
-        // option was enabled.
-        $zero_deleted = 0;
-        if ( ! empty( $options['skip_zero_results_logging'] ) ) {
-            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-            $rows = $wpdb->query(
-                $wpdb->prepare(
-                    'DELETE FROM %i WHERE results_count = 0',
-                    $table_name
-                )
-            );
-            if ( is_int( $rows ) ) {
-                $zero_deleted = $rows;
-            }
-        }
-
         // Clear the analytics cache so stats refresh
         delete_transient( 'riviantrackr_analytics_overview' );
 
-        $total_deleted = $deleted + $zero_deleted;
-        $parts         = array();
-        if ( $deleted > 0 ) {
-            $parts[] = number_format( $deleted ) . ' spam entries across ' . count( $spam_queries ) . ' queries';
-        }
-        if ( $zero_deleted > 0 ) {
-            $parts[] = number_format( $zero_deleted ) . ' zero-result entries';
-        }
-        $message = ! empty( $parts )
-            ? 'Deleted ' . implode( ' and ', $parts ) . '.'
-            : 'No spam entries detected in the logs.';
-
         wp_send_json_success( array(
-            'message' => $message,
-            'deleted' => $total_deleted,
+            'message' => number_format( $deleted ) . ' spam log entries deleted across ' . count( $spam_queries ) . ' spam queries.',
+            'deleted' => $deleted,
             'queries' => count( $spam_queries ),
         ) );
     }
@@ -2712,28 +2678,6 @@ class RivianTrackr_AI_Search_Summary {
                             </div>
                         </div>
 
-                        <!-- Skip Zero-Results Logging -->
-                        <div class="riviantrackr-field">
-                            <div class="riviantrackr-field-label">
-                                <label>Skip Zero-Results Logging</label>
-                            </div>
-                            <div class="riviantrackr-field-description">
-                                Don't log searches that return zero WordPress results. These are almost always spam, bot probes, or off-topic queries that slipped past pattern filters. Enabling this keeps your analytics clean without needing to maintain a growing blocklist. Disable if you want to track content gaps (queries your site doesn't cover yet).
-                            </div>
-                            <div class="riviantrackr-toggle-wrapper">
-                                <label class="riviantrackr-toggle">
-                                    <input type="checkbox"
-                                           name="<?php echo esc_attr( $this->option_name ); ?>[skip_zero_results_logging]"
-                                           value="1"
-                                           <?php checked( ! empty( $options['skip_zero_results_logging'] ), true ); ?> />
-                                    <span class="riviantrackr-toggle-slider"></span>
-                                </label>
-                                <span class="riviantrackr-toggle-label">
-                                    <?php echo ! empty( $options['skip_zero_results_logging'] ) ? 'Enabled' : 'Disabled'; ?>
-                                </span>
-                            </div>
-                        </div>
-
                         <!-- Require JS Challenge Token -->
                         <div class="riviantrackr-field">
                             <div class="riviantrackr-field-label">
@@ -2957,13 +2901,16 @@ class RivianTrackr_AI_Search_Summary {
 
         $base_url = admin_url( 'admin.php?page=riviantrackr-analytics' );
 
-        // Preserve other pagination params when navigating
+        // Preserve other pagination and filter params when navigating
         $preserve_params = array( 'queries_page', 'errors_page', 'events_page' );
         // phpcs:disable WordPress.Security.NonceVerification.Recommended -- Read-only pagination params on admin page
         foreach ( $preserve_params as $param ) {
             if ( $param !== $param_name && isset( $_GET[ $param ] ) ) {
                 $base_url = add_query_arg( $param, absint( wp_unslash( $_GET[ $param ] ) ), $base_url );
             }
+        }
+        if ( isset( $_GET['hide_zero'] ) && absint( wp_unslash( $_GET['hide_zero'] ) ) === 1 ) {
+            $base_url = add_query_arg( 'hide_zero', '1', $base_url );
         }
         // phpcs:enable WordPress.Security.NonceVerification.Recommended
         ?>
@@ -3002,12 +2949,16 @@ class RivianTrackr_AI_Search_Summary {
         global $wpdb;
         $table_name = self::get_logs_table_name();
 
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only filter param on admin page
+        $hide_zero = isset( $_GET['hide_zero'] ) && absint( wp_unslash( $_GET['hide_zero'] ) ) === 1;
+        $where_clause = $hide_zero ? ' WHERE results_count > 0' : '';
+
         // Get estimated row count to optimize queries for large datasets
         $estimated_rows = $this->get_estimated_row_count( $table_name );
         $is_large_table = $estimated_rows > RIVIANTRACKR_LARGE_TABLE_THRESHOLD;
 
-        // Get cached overview stats (5-minute TTL)
-        $cache_key = 'riviantrackr_analytics_overview';
+        // Get cached overview stats (5-minute TTL) — separate cache key when filtering
+        $cache_key = $hide_zero ? 'riviantrackr_analytics_overview_nozero' : 'riviantrackr_analytics_overview';
         $cached_stats = get_transient( $cache_key );
 
         if ( false === $cached_stats ) {
@@ -3022,11 +2973,12 @@ class RivianTrackr_AI_Search_Summary {
                         SUM(CASE WHEN cache_hit IN (1, 2) THEN 1 ELSE 0 END) AS cache_hits,
                         SUM(CASE WHEN cache_hit = 0 THEN 1 ELSE 0 END) AS cache_misses,
                         AVG(response_time_ms) AS avg_response_time
-                     FROM %i',
+                     FROM %i' . $where_clause,
                     $table_name
                 )
             );
 
+            // Always count zero-result entries (for the filter label)
             // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
             $no_results_count = (int) $wpdb->get_var(
                 $wpdb->prepare( 'SELECT COUNT(*) FROM %i WHERE results_count = 0', $table_name )
@@ -3056,15 +3008,17 @@ class RivianTrackr_AI_Search_Summary {
         $feedback_stats = $this->get_feedback_stats();
 
         $since_24h = gmdate( 'Y-m-d H:i:s', time() - 24 * 60 * 60 );
+        $last_24_where = $hide_zero ? ' WHERE results_count > 0 AND created_at >= %s' : ' WHERE created_at >= %s';
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
         $last_24   = (int) $wpdb->get_var(
             $wpdb->prepare(
-                'SELECT COUNT(*) FROM %i WHERE created_at >= %s',
+                'SELECT COUNT(*) FROM %i' . $last_24_where,
                 $table_name,
                 $since_24h
             )
         );
 
+        $daily_where = $hide_zero ? ' WHERE results_count > 0' : '';
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
         $daily_stats = $wpdb->get_results(
             $wpdb->prepare(
@@ -3074,7 +3028,7 @@ class RivianTrackr_AI_Search_Summary {
                     SUM(ai_success) AS success_count,
                     SUM(CASE WHEN cache_hit IN (1, 2) THEN 1 ELSE 0 END) AS cache_hits,
                     SUM(CASE WHEN cache_hit = 0 THEN 1 ELSE 0 END) AS cache_misses
-                 FROM %i
+                 FROM %i' . $daily_where . '
                  GROUP BY DATE(created_at)
                  ORDER BY day DESC
                  LIMIT 14',
@@ -3092,9 +3046,10 @@ class RivianTrackr_AI_Search_Summary {
 
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
         $total_unique_queries = (int) $wpdb->get_var(
-            $wpdb->prepare( 'SELECT COUNT(DISTINCT search_query) FROM %i', $table_name )
+            $wpdb->prepare( 'SELECT COUNT(DISTINCT search_query) FROM %i' . $where_clause, $table_name )
         );
 
+        $top_q_where = $hide_zero ? ' WHERE l.results_count > 0' : '';
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
         $top_queries = $wpdb->get_results(
             $wpdb->prepare(
@@ -3110,7 +3065,7 @@ class RivianTrackr_AI_Search_Summary {
                             SUM(helpful) AS helpful_count
                      FROM %i
                      GROUP BY search_query
-                 ) f ON l.search_query = f.search_query
+                 ) f ON l.search_query = f.search_query' . $top_q_where . '
                  GROUP BY l.search_query
                  ORDER BY total DESC
                  LIMIT %d OFFSET %d',
@@ -3129,10 +3084,14 @@ class RivianTrackr_AI_Search_Summary {
         $errors_page     = isset( $_GET['errors_page'] ) ? max( 1, absint( wp_unslash( $_GET['errors_page'] ) ) ) : 1;
         $errors_offset   = ( $errors_page - 1 ) * $errors_per_page;
 
+        $errors_where = $hide_zero
+            ? 'WHERE ai_error IS NOT NULL AND ai_error <> \'\' AND results_count > 0'
+            : 'WHERE ai_error IS NOT NULL AND ai_error <> \'\'';
+
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
         $total_unique_errors = (int) $wpdb->get_var(
             $wpdb->prepare(
-                'SELECT COUNT(DISTINCT ai_error) FROM %i WHERE ai_error IS NOT NULL AND ai_error <> \'\'',
+                'SELECT COUNT(DISTINCT ai_error) FROM %i ' . $errors_where,
                 $table_name
             )
         );
@@ -3142,7 +3101,7 @@ class RivianTrackr_AI_Search_Summary {
             $wpdb->prepare(
                 'SELECT ai_error, COUNT(*) AS total
                  FROM %i
-                 WHERE ai_error IS NOT NULL AND ai_error <> \'\'
+                 ' . $errors_where . '
                  GROUP BY ai_error
                  ORDER BY total DESC
                  LIMIT %d OFFSET %d',
@@ -3169,7 +3128,7 @@ class RivianTrackr_AI_Search_Summary {
         $recent_events = $wpdb->get_results(
             $wpdb->prepare(
                 'SELECT *
-                 FROM %i
+                 FROM %i' . $where_clause . '
                  ORDER BY created_at DESC
                  LIMIT %d OFFSET %d',
                 $table_name,
@@ -3182,6 +3141,33 @@ class RivianTrackr_AI_Search_Summary {
         $total_events = $total_searches;
         $total_pages  = min( $max_pages, (int) ceil( $total_events / $events_per_page ) );
         ?>
+
+        <!-- Filter Bar -->
+        <div style="margin-bottom: 16px; padding: 10px 16px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; display: flex; align-items: center; gap: 8px;">
+            <?php
+            $filter_url = admin_url( 'admin.php?page=riviantrackr-analytics' );
+            if ( $hide_zero ) {
+                $filter_label = 'Showing results with matches only';
+            } else {
+                $filter_url = add_query_arg( 'hide_zero', '1', $filter_url );
+                $filter_label = 'Hide zero-result queries';
+            }
+            ?>
+            <?php if ( $hide_zero ) : ?>
+                <a href="<?php echo esc_url( admin_url( 'admin.php?page=riviantrackr-analytics' ) ); ?>"
+                   style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; font-size: 13px; font-weight: 500; color: #1e40af; background: #dbeafe; border: 1px solid #93c5fd; border-radius: 6px; text-decoration: none; cursor: pointer;">
+                    &#10003; Hiding <?php echo number_format( $no_results_count ); ?> zero-result entries &mdash; click to show all
+                </a>
+            <?php else : ?>
+                <a href="<?php echo esc_url( $filter_url ); ?>"
+                   style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; font-size: 13px; font-weight: 500; color: #374151; background: #fff; border: 1px solid #d1d5db; border-radius: 6px; text-decoration: none; cursor: pointer;">
+                    <?php echo esc_html( $filter_label ); ?>
+                    <?php if ( $no_results_count > 0 ) : ?>
+                        <span style="font-size: 11px; color: #6b7280;">(<?php echo number_format( $no_results_count ); ?> entries)</span>
+                    <?php endif; ?>
+                </a>
+            <?php endif; ?>
+        </div>
 
         <!-- Overview Stats Grid -->
         <div class="riviantrackr-stats-grid">
@@ -4027,12 +4013,6 @@ class RivianTrackr_AI_Search_Summary {
             return;
         }
 
-        // When enabled, skip logging zero-result searches entirely — they are
-        // almost always spam or off-topic noise that passed pattern filters.
-        if ( ! empty( $options['skip_zero_results_logging'] ) ) {
-            return;
-        }
-
         $this->log_search_event( $search_query, 0, 0, 'No matching articles found', null );
     }
 
@@ -4698,9 +4678,7 @@ class RivianTrackr_AI_Search_Summary {
         if ( 0 === $results_count ) {
             $site_name = ! empty( $options['site_name'] ) ? $options['site_name'] : get_bloginfo( 'name' );
 
-            if ( empty( $options['skip_zero_results_logging'] ) ) {
-                $this->log_search_event( $search_query, 0, 0, 'No matching posts found' );
-            }
+            $this->log_search_event( $search_query, 0, 0, 'No matching posts found' );
 
             return rest_ensure_response(
                 array(
