@@ -223,6 +223,73 @@ class InputValidator {
 	}
 
 	/**
+	 * Detect off-topic queries unrelated to the site.
+	 *
+	 * When relevance keywords are configured, this checks whether the search
+	 * query contains at least one keyword. Queries that match nothing are
+	 * considered off-topic.
+	 *
+	 * @param string $value   Input value to check.
+	 * @param array  $options Plugin options (for relevance_keywords).
+	 * @return bool True if the query is off-topic (should be blocked).
+	 */
+	public function is_off_topic_query( string $value, array $options = array() ): bool {
+		$keywords_raw = isset( $options['relevance_keywords'] ) ? $options['relevance_keywords'] : '';
+		if ( empty( trim( $keywords_raw ) ) ) {
+			return false; // No keywords configured — allow everything.
+		}
+
+		$normalized_query = strtolower( trim( $value ) );
+		if ( empty( $normalized_query ) ) {
+			return true;
+		}
+
+		// Parse keywords: comma or newline separated.
+		$keywords = array_filter(
+			array_map(
+				function ( $k ) {
+					return strtolower( trim( $k ) );
+				},
+				preg_split( '/[,\n]+/', $keywords_raw )
+			),
+			function ( $k ) {
+				return ! empty( $k );
+			}
+		);
+
+		if ( empty( $keywords ) ) {
+			return false; // No valid keywords after parsing.
+		}
+
+		// Check if any keyword appears in the query (substring match).
+		foreach ( $keywords as $keyword ) {
+			if ( strpos( $normalized_query, $keyword ) !== false ) {
+				return false; // Query is relevant.
+			}
+		}
+
+		// Also check if any query word matches a keyword exactly.
+		$query_words = preg_split( '/[\s\-_]+/', $normalized_query );
+		foreach ( $query_words as $word ) {
+			$word = trim( $word, '.,;:!?()[]{}"\'' );
+			if ( empty( $word ) ) {
+				continue;
+			}
+			foreach ( $keywords as $keyword ) {
+				if ( $word === $keyword ) {
+					return false; // Exact word match — query is relevant.
+				}
+			}
+		}
+
+		if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+			// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+			error_log( '[RivianTrackr AI Search Summary] Blocked off-topic query: ' . substr( $value, 0, 100 ) );
+		}
+		return true; // No keyword matched — off-topic.
+	}
+
+	/**
 	 * Sanitize custom CSS input.
 	 *
 	 * Removes dangerous patterns (JS URLs, expressions, data URIs with
