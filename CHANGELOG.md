@@ -5,6 +5,22 @@ All notable changes to RivianTrackr AI Search Summary will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-03-01
+
+### Added
+
+- **Progressive IP penalties** — Repeat rate-limit offenders now face escalating bans instead of a simple 60-second reset. 2nd strike within 10 minutes triggers a 5-minute ban, 3rd within 30 minutes triggers a 30-minute ban, and 4th+ within 1 hour triggers a 24-hour ban. Strike history tracked via WordPress transients.
+- **Mandatory JS challenge token** — New "Require JavaScript Challenge" setting (enabled by default) makes the `bt`/`bts` bot challenge token mandatory on the summary endpoint. Previously, bots could bypass the check by omitting the token parameters entirely.
+- **Honeypot field** — A hidden input field is rendered in the search summary widget. Legitimate JavaScript-driven requests send it empty; bots that auto-fill form fields are instantly rejected with a 403.
+- **Duplicate query throttling** — The same search query from the same IP is blocked for 5 minutes to prevent bots from repeatedly hammering the AI API with identical requests. Legitimate users are unaffected since the frontend session cache already handles repeat queries.
+- **RateLimiter unit tests** — 27 new PHPUnit tests covering progressive IP bans, duplicate query detection, bot token validation, IP rate limiting, log rate limiting, and client IP resolution.
+
+### Changed
+
+- **Version bumped to 1.3.0** — Security and spam prevention release.
+
+---
+
 ## [1.2.0] - 2026-02-28
 
 ### Added

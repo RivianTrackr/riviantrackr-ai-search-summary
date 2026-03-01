@@ -146,6 +146,10 @@
       endpoint += '&bt=' + encodeURIComponent(window.RivianTrackrAI.botToken) + '&bts=' + encodeURIComponent(window.RivianTrackrAI.botTokenTs);
     }
 
+    // Append honeypot field value (should always be empty for real users)
+    var hpField = document.getElementById('riviantrackr-hp');
+    endpoint += '&hp=' + encodeURIComponent(hpField ? hpField.value : '');
+
     // Set timeout with AbortController to actually cancel the request
     var timeoutMs = (window.RivianTrackrAI.requestTimeout || 60) * 1000;
     var abortController = new AbortController();

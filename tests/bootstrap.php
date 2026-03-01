@@ -13,7 +13,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 // Plugin constants normally defined in the main plugin file.
 if ( ! defined( 'RIVIANTRACKR_VERSION' ) ) {
-	define( 'RIVIANTRACKR_VERSION', '1.2.0' );
+	define( 'RIVIANTRACKR_VERSION', '1.3.0' );
 }
 if ( ! defined( 'RIVIANTRACKR_MAX_TOKENS' ) ) {
 	define( 'RIVIANTRACKR_MAX_TOKENS', 1500 );
