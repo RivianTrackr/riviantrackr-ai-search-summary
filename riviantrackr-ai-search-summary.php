@@ -2909,7 +2909,12 @@ class RivianTrackr_AI_Search_Summary {
                 $base_url = add_query_arg( $param, absint( wp_unslash( $_GET[ $param ] ) ), $base_url );
             }
         }
-        if ( isset( $_GET['hide_zero'] ) && absint( wp_unslash( $_GET['hide_zero'] ) ) === 1 ) {
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only filter param on admin page
+        if ( isset( $_GET['hide_zero'] ) ) {
+            if ( absint( wp_unslash( $_GET['hide_zero'] ) ) === 1 ) {
+                $base_url = add_query_arg( 'hide_zero', '1', $base_url );
+            }
+        } elseif ( get_user_meta( get_current_user_id(), 'riviantrackr_hide_zero', true ) === '1' ) {
             $base_url = add_query_arg( 'hide_zero', '1', $base_url );
         }
         // phpcs:enable WordPress.Security.NonceVerification.Recommended
@@ -2949,8 +2954,14 @@ class RivianTrackr_AI_Search_Summary {
         global $wpdb;
         $table_name = self::get_logs_table_name();
 
+        // Sticky filter: remember preference in user meta.
         // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only filter param on admin page
-        $hide_zero = isset( $_GET['hide_zero'] ) && absint( wp_unslash( $_GET['hide_zero'] ) ) === 1;
+        if ( isset( $_GET['hide_zero'] ) ) {
+            $hide_zero = absint( wp_unslash( $_GET['hide_zero'] ) ) === 1;
+            update_user_meta( get_current_user_id(), 'riviantrackr_hide_zero', $hide_zero ? '1' : '0' );
+        } else {
+            $hide_zero = get_user_meta( get_current_user_id(), 'riviantrackr_hide_zero', true ) === '1';
+        }
         $where_clause = $hide_zero ? ' WHERE results_count > 0' : '';
 
         // Get estimated row count to optimize queries for large datasets
@@ -3154,7 +3165,7 @@ class RivianTrackr_AI_Search_Summary {
             }
             ?>
             <?php if ( $hide_zero ) : ?>
-                <a href="<?php echo esc_url( admin_url( 'admin.php?page=riviantrackr-analytics' ) ); ?>"
+                <a href="<?php echo esc_url( admin_url( 'admin.php?page=riviantrackr-analytics&hide_zero=0' ) ); ?>"
                    style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; font-size: 13px; font-weight: 500; color: #1e40af; background: #dbeafe; border: 1px solid #93c5fd; border-radius: 6px; text-decoration: none; cursor: pointer;">
                     &#10003; Hiding <?php echo number_format( $no_results_count ); ?> zero-result entries &mdash; click to show all
                 </a>

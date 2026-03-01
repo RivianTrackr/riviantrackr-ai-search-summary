@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **"Hide zero-result queries" filter on Analytics dashboard** — A toggle button at the top of the Analytics page that filters zero-result entries out of all views (overview stats, daily stats, top queries, top errors, and recent events). Non-destructive — data stays in the database and reappears when the filter is toggled off. Uses the existing indexed `results_count` column so there is no performance cost. Useful for seeing clean analytics without spam, while preserving the ability to analyze content gaps when needed.
+- **Sticky filter preference** — The "Hide zero-result queries" toggle now remembers your choice via WordPress user meta. Once enabled, the filter stays active across page loads, navigation, and browser sessions — no need to re-enable it every time you visit Analytics. Each admin user's preference is stored independently.
 
 ---
 
