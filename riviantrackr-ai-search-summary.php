@@ -6,7 +6,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Plugin Name: AI Search Summary
  * Description: Add AI-powered summaries to WordPress search results using OpenAI or Anthropic Claude. Non-blocking, with analytics, cache control, and collapsible sources.
- * Version: 1.3.1
+ * Version: 1.3.2
  * Author: Jose Castillo
  * Author URI: https://github.com/RivianTrackr/
  * License: GPL v2 or later
@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Domain Path: /languages
  */
 
-define( 'RIVIANTRACKR_VERSION', '1.3.1' );
+define( 'RIVIANTRACKR_VERSION', '1.3.2' );
 
 // Load the namespaced class autoloader.
 require_once __DIR__ . '/includes/class-autoloader.php';
@@ -3881,6 +3881,22 @@ class RivianTrackr_AI_Search_Summary {
 
         $search_query = get_search_query();
         if ( empty( $search_query ) ) {
+            return;
+        }
+
+        // Skip logging for bots — they pollute analytics with junk queries.
+        if ( $this->is_likely_bot() ) {
+            return;
+        }
+
+        // Apply the same input validation as the REST endpoint so spam,
+        // SQL injection probes, and off-topic queries are never logged.
+        $options = $this->get_options();
+        if ( ! $this->input_validator->validate_search_query( $search_query, $options ) ) {
+            return;
+        }
+
+        if ( $this->input_validator->is_off_topic_query( $search_query, $options ) ) {
             return;
         }
 
