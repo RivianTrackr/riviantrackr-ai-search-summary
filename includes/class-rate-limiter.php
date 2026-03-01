@@ -231,6 +231,126 @@ class RateLimiter {
 	}
 
 	/**
+	 * Record a rate-limit strike against an IP for progressive penalties.
+	 *
+	 * Strike escalation:
+	 *   1st strike: no extra ban (normal 60s window applies)
+	 *   2nd strike within 10 min: 5-minute ban
+	 *   3rd strike within 30 min: 30-minute ban
+	 *   4th+ strike within 1 hour: 24-hour ban
+	 *
+	 * @param string $ip Client IP address.
+	 */
+	public function record_strike( string $ip ): void {
+		$ip_hash    = hash( 'sha256', $ip );
+		$key        = 'riviantrackr_strikes_' . substr( $ip_hash, 0, 32 );
+		$ban_key    = 'riviantrackr_ban_' . substr( $ip_hash, 0, 32 );
+		$now        = time();
+
+		$strikes = get_transient( $key );
+		if ( ! is_array( $strikes ) ) {
+			$strikes = array();
+		}
+
+		// Keep only strikes from the last hour.
+		$cutoff  = $now - 3600;
+		$strikes = array_values( array_filter( $strikes, function ( $ts ) use ( $cutoff ) {
+			return $ts > $cutoff;
+		} ) );
+
+		$strikes[] = $now;
+		set_transient( $key, $strikes, 86400 );
+
+		$count = count( $strikes );
+
+		// Determine ban duration based on strike count.
+		$ban_duration = 0;
+		if ( $count >= 4 ) {
+			$ban_duration = 86400; // 24 hours
+		} elseif ( $count >= 3 ) {
+			// Only if 3rd strike within 30 min of 1st.
+			$window_strikes = array_filter( $strikes, function ( $ts ) use ( $now ) {
+				return $ts > ( $now - 1800 );
+			} );
+			if ( count( $window_strikes ) >= 3 ) {
+				$ban_duration = 1800; // 30 minutes
+			}
+		} elseif ( $count >= 2 ) {
+			// Only if 2nd strike within 10 min of 1st.
+			$window_strikes = array_filter( $strikes, function ( $ts ) use ( $now ) {
+				return $ts > ( $now - 600 );
+			} );
+			if ( count( $window_strikes ) >= 2 ) {
+				$ban_duration = 300; // 5 minutes
+			}
+		}
+
+		if ( $ban_duration > 0 ) {
+			set_transient( $ban_key, $now + $ban_duration, $ban_duration );
+		}
+	}
+
+	/**
+	 * Check if an IP is currently banned from progressive penalties.
+	 *
+	 * @param string $ip Client IP address.
+	 * @return bool True if banned.
+	 */
+	public function is_ip_banned( string $ip ): bool {
+		$ip_hash = hash( 'sha256', $ip );
+		$ban_key = 'riviantrackr_ban_' . substr( $ip_hash, 0, 32 );
+
+		$expiry = get_transient( $ban_key );
+		if ( false === $expiry ) {
+			return false;
+		}
+
+		return time() < (int) $expiry;
+	}
+
+	/**
+	 * Get the remaining seconds of an IP ban.
+	 *
+	 * @param string $ip Client IP address.
+	 * @return int Remaining seconds, or 0 if not banned.
+	 */
+	public function get_ban_expiry( string $ip ): int {
+		$ip_hash = hash( 'sha256', $ip );
+		$ban_key = 'riviantrackr_ban_' . substr( $ip_hash, 0, 32 );
+
+		$expiry = get_transient( $ban_key );
+		if ( false === $expiry ) {
+			return 0;
+		}
+
+		return max( 0, (int) $expiry - time() );
+	}
+
+	/**
+	 * Check if the same query from the same IP was made recently.
+	 *
+	 * Blocks duplicate queries from the same IP within a 5-minute window
+	 * to prevent bots from hammering the same search repeatedly.
+	 *
+	 * @param string $ip    Client IP address.
+	 * @param string $query Search query string.
+	 * @return bool True if this is a duplicate (should be throttled).
+	 */
+	public function is_duplicate_query( string $ip, string $query ): bool {
+		$ip_hash    = substr( hash( 'sha256', $ip ), 0, 16 );
+		$query_hash = substr( hash( 'sha256', strtolower( trim( $query ) ) ), 0, 16 );
+		$key        = 'riviantrackr_dup_' . $ip_hash . '_' . $query_hash;
+
+		$existing = get_transient( $key );
+		if ( false !== $existing ) {
+			return true;
+		}
+
+		set_transient( $key, 1, 300 ); // 5-minute window
+		return false;
+	}
+
+	/**
 	 * Get the client IP address.
 	 *
 	 * @return string Client IP or 'unknown'.

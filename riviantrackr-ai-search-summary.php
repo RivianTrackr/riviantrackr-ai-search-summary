@@ -472,6 +472,7 @@ class RivianTrackr_AI_Search_Summary {
             'allow_reasoning_models'  => 0,
             'anonymize_queries'       => 0,
             'spam_blocklist'          => '',
+            'require_bot_token'       => 1,
             'post_types'              => array(),
             'max_sources_display'     => RIVIANTRACKR_MAX_SOURCES_DISPLAY,
             'content_length'          => RIVIANTRACKR_CONTENT_LENGTH,
@@ -645,6 +646,9 @@ class RivianTrackr_AI_Search_Summary {
         } else {
             $output['spam_blocklist'] = '';
         }
+
+        // Require JS challenge token for bot prevention
+        $output['require_bot_token'] = isset( $input['require_bot_token'] ) && $input['require_bot_token'] ? 1 : 0;
 
         // Post type filtering
         if ( isset( $input['post_types'] ) && is_array( $input['post_types'] ) ) {
@@ -2568,6 +2572,28 @@ class RivianTrackr_AI_Search_Summary {
                             </div>
                         </div>
 
+                        <!-- Require JS Challenge Token -->
+                        <div class="riviantrackr-field">
+                            <div class="riviantrackr-field-label">
+                                <label>Require JavaScript Challenge</label>
+                            </div>
+                            <div class="riviantrackr-field-description">
+                                When enabled, the AI summary endpoint requires a JavaScript-generated challenge token. This blocks bots that do not execute JavaScript. Disable only if you have custom integrations that call the API directly.
+                            </div>
+                            <div class="riviantrackr-toggle-wrapper">
+                                <label class="riviantrackr-toggle">
+                                    <input type="checkbox"
+                                           name="<?php echo esc_attr( $this->option_name ); ?>[require_bot_token]"
+                                           value="1"
+                                           <?php checked( ! empty( $options['require_bot_token'] ), true ); ?> />
+                                    <span class="riviantrackr-toggle-slider"></span>
+                                </label>
+                                <span class="riviantrackr-toggle-label">
+                                    <?php echo ! empty( $options['require_bot_token'] ) ? 'Required' : 'Optional'; ?>
+                                </span>
+                            </div>
+                        </div>
+
                         <!-- Preserve Data on Uninstall -->
                         <div class="riviantrackr-field">
                             <div class="riviantrackr-field-label">
@@ -3878,6 +3904,7 @@ class RivianTrackr_AI_Search_Summary {
                     <span class="riviantrackr-spinner" role="status" aria-label="Loading AI summary"></span>
                     <p class="riviantrackr-loading-text">Generating summary based on your search and <?php echo esc_html( $site_name ); ?> articles...</p>
                 </div>
+                <input type="text" name="riviantrackr_website_url" id="riviantrackr-hp" value="" autocomplete="off" tabindex="-1" aria-hidden="true" style="position:absolute;left:-9999px;top:-9999px;height:0;width:0;overflow:hidden;opacity:0;pointer-events:none;" />
 
                 <?php if ( $show_feedback ) : ?>
                 <div id="riviantrackr-feedback" class="riviantrackr-feedback" style="display:none; margin-top:0.75rem; padding-top:0.75rem; border-top:1px solid rgba(128,128,128,0.3);">
@@ -4019,6 +4046,11 @@ class RivianTrackr_AI_Search_Summary {
                     'bts' => array(
                         'required'          => false,
                         'sanitize_callback' => 'absint',
+                    ),
+                    'hp' => array(
+                        'required'          => false,
+                        'sanitize_callback' => 'sanitize_text_field',
+                        'default'           => '',
                     ),
                 ),
             )
@@ -4170,11 +4202,31 @@ class RivianTrackr_AI_Search_Summary {
             );
         }
 
+        // Honeypot field check — if filled, it's a bot
+        $honeypot = $request->get_param( 'hp' );
+        if ( ! empty( $honeypot ) ) {
+            return new WP_Error(
+                RIVIANTRACKR_ERROR_BOT_DETECTED,
+                'AI search is not available for automated requests.',
+                array( 'status' => 403 )
+            );
+        }
+
         // JS challenge token verification — bots that skip JS execution
         // will not have the token generated in enqueue_frontend_assets().
         // Token is valid for 10 minutes to allow for slow page loads.
         $bt  = $request->get_param( 'bt' );
         $bts = $request->get_param( 'bts' );
+
+        $options = $this->get_options();
+        if ( ! empty( $options['require_bot_token'] ) && ( empty( $bt ) || empty( $bts ) ) ) {
+            return new WP_Error(
+                RIVIANTRACKR_ERROR_BOT_DETECTED,
+                'JavaScript challenge token is required. Please access this page through a browser.',
+                array( 'status' => 403 )
+            );
+        }
+
         if ( $bt && $bts ) {
             if ( ! $this->rate_limiter->validate_bot_token( $bt, (int) $bts ) ) {
                 return new WP_Error(
@@ -4185,18 +4237,55 @@ class RivianTrackr_AI_Search_Summary {
             }
         }
 
-        // Per-IP rate limiting (more aggressive than global limit)
+        // Per-IP rate limiting with progressive penalties
         $client_ip = $this->get_client_ip();
-        if ( $this->is_ip_rate_limited( $client_ip ) ) {
-            $rate_info = $this->get_rate_limit_info( $client_ip );
+
+        // Check if IP is banned from progressive penalties
+        if ( $this->rate_limiter->is_ip_banned( $client_ip ) ) {
+            $retry_after = $this->rate_limiter->get_ban_expiry( $client_ip );
             return new WP_Error(
                 RIVIANTRACKR_ERROR_RATE_LIMITED,
-                'Too many requests from your IP address. Please try again in a minute.',
+                'Your IP has been temporarily restricted due to excessive requests. Please try again later.',
                 array(
-                    'status'     => 429,
-                    'retry_after' => max( 1, $rate_info['reset'] - time() ),
+                    'status'      => 429,
+                    'retry_after' => $retry_after,
                 )
             );
+        }
+
+        if ( $this->is_ip_rate_limited( $client_ip ) ) {
+            // Record strike and apply progressive penalty
+            $this->rate_limiter->record_strike( $client_ip );
+            $retry_after = $this->rate_limiter->get_ban_expiry( $client_ip );
+
+            if ( $retry_after <= 0 ) {
+                $rate_info   = $this->get_rate_limit_info( $client_ip );
+                $retry_after = max( 1, $rate_info['reset'] - time() );
+            }
+
+            return new WP_Error(
+                RIVIANTRACKR_ERROR_RATE_LIMITED,
+                'Too many requests from your IP address. Please try again later.',
+                array(
+                    'status'      => 429,
+                    'retry_after' => $retry_after,
+                )
+            );
+        }
+
+        // Duplicate query throttling — block same query from same IP within 5 min
+        $query = $request->get_param( 'q' );
+        if ( is_string( $query ) && ! empty( $query ) ) {
+            if ( $this->rate_limiter->is_duplicate_query( $client_ip, $query ) ) {
+                return new WP_Error(
+                    RIVIANTRACKR_ERROR_RATE_LIMITED,
+                    'This query was recently processed. Please wait before searching again.',
+                    array(
+                        'status'      => 429,
+                        'retry_after' => 300,
+                    )
+                );
+            }
         }
 
         return true;
