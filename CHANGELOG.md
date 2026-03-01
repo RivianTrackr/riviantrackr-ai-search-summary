@@ -5,6 +5,14 @@ All notable changes to RivianTrackr AI Search Summary will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.3] - 2026-03-01
+
+### Fixed
+
+- **Off-topic queries no longer logged to analytics** — The off-topic filter in `rest_get_summary()` was calling `log_search_event()` before returning the error response, which meant every junk query like "scrub daddy" or "costco credit card" still ended up in the analytics database even though it was correctly blocked from reaching the AI API. The log call has been removed so off-topic queries are silently dropped — they never appear in analytics, never consume database space, and never clutter the admin dashboard.
+
+---
+
 ## [1.3.2] - 2026-03-01
 
 ### Fixed
