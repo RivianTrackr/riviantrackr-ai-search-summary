@@ -4,7 +4,7 @@ Tags: search, ai, openai, anthropic, claude, summary, chatgpt
 Requires at least: 6.9
 Tested up to: 6.9
 Requires PHP: 8.4
-Stable tag: 1.3.2
+Stable tag: 1.3.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -175,6 +175,9 @@ The plugin is designed with privacy in mind:
 
 == Changelog ==
 
+= 1.3.3 =
+* Fixed: Off-topic queries no longer logged to analytics — previously the REST endpoint still called log_search_event() before returning the off-topic error, polluting analytics with the junk it was supposed to block
+
 = 1.3.2 =
 * Fixed: Server-side no-results logging now applies bot detection, spam filtering, and off-topic checks — previously bots could pollute analytics by hitting /?s=junk without executing JavaScript
 
@@ -306,6 +309,9 @@ The plugin is designed with privacy in mind:
 * Security headers and prepared statements
 
 == Upgrade Notice ==
+
+= 1.3.3 =
+Off-topic queries are now fully silent — they are blocked and not logged to analytics at all. Previously the off-topic filter still recorded the junk query before returning the error.
 
 = 1.3.2 =
 Closes the server-side logging gap that allowed bots to pollute analytics by requesting /?s=junk directly. No-results searches now go through the same bot detection, spam filtering, and off-topic checks as the REST API endpoint.
