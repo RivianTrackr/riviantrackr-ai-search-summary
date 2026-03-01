@@ -6,7 +6,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Plugin Name: AI Search Summary
  * Description: Add AI-powered summaries to WordPress search results using OpenAI or Anthropic Claude. Non-blocking, with analytics, cache control, and collapsible sources.
- * Version: 1.3.0
+ * Version: 1.3.1
  * Author: Jose Castillo
  * Author URI: https://github.com/RivianTrackr/
  * License: GPL v2 or later
@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Domain Path: /languages
  */
 
-define( 'RIVIANTRACKR_VERSION', '1.3.0' );
+define( 'RIVIANTRACKR_VERSION', '1.3.1' );
 
 // Load the namespaced class autoloader.
 require_once __DIR__ . '/includes/class-autoloader.php';
@@ -74,6 +74,7 @@ define( 'RIVIANTRACKR_ERROR_NOT_CONFIGURED', 'not_configured' );
 define( 'RIVIANTRACKR_ERROR_INVALID_QUERY', 'invalid_query' );
 define( 'RIVIANTRACKR_ERROR_API_ERROR', 'api_error' );
 define( 'RIVIANTRACKR_ERROR_NO_RESULTS', 'no_results' );
+define( 'RIVIANTRACKR_ERROR_OFF_TOPIC', 'off_topic' );
 
 
 class RivianTrackr_AI_Search_Summary {
@@ -472,6 +473,7 @@ class RivianTrackr_AI_Search_Summary {
             'allow_reasoning_models'  => 0,
             'anonymize_queries'       => 0,
             'spam_blocklist'          => '',
+            'relevance_keywords'      => '',
             'require_bot_token'       => 1,
             'post_types'              => array(),
             'max_sources_display'     => RIVIANTRACKR_MAX_SOURCES_DISPLAY,
@@ -645,6 +647,21 @@ class RivianTrackr_AI_Search_Summary {
             $output['spam_blocklist'] = implode( "\n", $clean_lines );
         } else {
             $output['spam_blocklist'] = '';
+        }
+
+        // Relevance keywords: comma or newline separated, sanitize each entry
+        if ( isset( $input['relevance_keywords'] ) ) {
+            $lines = preg_split( '/[,\n]+/', $input['relevance_keywords'] );
+            $clean = array();
+            foreach ( $lines as $line ) {
+                $line = sanitize_text_field( trim( $line ) );
+                if ( ! empty( $line ) ) {
+                    $clean[] = $line;
+                }
+            }
+            $output['relevance_keywords'] = implode( "\n", $clean );
+        } else {
+            $output['relevance_keywords'] = '';
         }
 
         // Require JS challenge token for bot prevention
@@ -2572,6 +2589,24 @@ class RivianTrackr_AI_Search_Summary {
                             </div>
                         </div>
 
+                        <!-- Relevance Keywords (Off-Topic Filter) -->
+                        <div class="riviantrackr-field">
+                            <div class="riviantrackr-field-label">
+                                <label for="riviantrackr-relevance-keywords">Relevance Keywords</label>
+                            </div>
+                            <div class="riviantrackr-field-description">
+                                Only allow search queries that mention at least one of these keywords. This prevents completely unrelated queries (e.g. "costco credit card", "msi monitor") from cluttering your analytics and wasting resources. One keyword per line or comma-separated. Case-insensitive. Leave empty to allow all queries.
+                            </div>
+                            <div class="riviantrackr-field-input">
+                                <textarea
+                                    id="riviantrackr-relevance-keywords"
+                                    name="<?php echo esc_attr( $this->option_name ); ?>[relevance_keywords]"
+                                    rows="6"
+                                    style="width: 100%; max-width: 500px; font-family: monospace; font-size: 13px;"
+                                    placeholder="rivian&#10;r1t&#10;r1s&#10;r2&#10;electric vehicle&#10;ev truck"><?php echo esc_textarea( isset( $options['relevance_keywords'] ) ? $options['relevance_keywords'] : '' ); ?></textarea>
+                            </div>
+                        </div>
+
                         <!-- Require JS Challenge Token -->
                         <div class="riviantrackr-field">
                             <div class="riviantrackr-field-label">
@@ -3824,6 +3859,7 @@ class RivianTrackr_AI_Search_Summary {
                     'apiError'     => RIVIANTRACKR_ERROR_API_ERROR,
                     'rateLimited'  => RIVIANTRACKR_ERROR_RATE_LIMITED,
                     'notConfigured' => RIVIANTRACKR_ERROR_NOT_CONFIGURED,
+                    'offTopic'     => RIVIANTRACKR_ERROR_OFF_TOPIC,
                 ),
             )
         );
@@ -4438,6 +4474,22 @@ class RivianTrackr_AI_Search_Summary {
                     'answer_html' => '',
                     'error'       => 'Missing search query.',
                     'error_code'  => RIVIANTRACKR_ERROR_INVALID_QUERY,
+                )
+            );
+        }
+
+        // Off-topic filter: reject queries unrelated to the site's topics.
+        if ( $this->input_validator->is_off_topic_query( $search_query, $options ) ) {
+            $site_name = ! empty( $options['site_name'] ) ? $options['site_name'] : get_bloginfo( 'name' );
+
+            $this->log_search_event( $search_query, 0, 0, 'Off-topic query' );
+
+            return rest_ensure_response(
+                array(
+                    'answer_html'   => '',
+                    'results_count' => 0,
+                    'error'         => 'This search doesn\'t appear to be related to ' . $site_name . '. Try searching for topics covered on this site.',
+                    'error_code'    => RIVIANTRACKR_ERROR_OFF_TOPIC,
                 )
             );
         }

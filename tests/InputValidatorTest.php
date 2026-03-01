@@ -121,6 +121,68 @@ class InputValidatorTest extends TestCase {
 		$this->assertFalse( $this->validator->is_spam_query( 'best electric truck 2025' ) );
 	}
 
+	// --- Off-Topic Query Detection ---
+
+	public function test_off_topic_allows_all_when_no_keywords(): void {
+		$this->assertFalse( $this->validator->is_off_topic_query( 'msi monitor amazon portugal' ) );
+	}
+
+	public function test_off_topic_allows_all_when_keywords_empty_string(): void {
+		$options = array( 'relevance_keywords' => '' );
+		$this->assertFalse( $this->validator->is_off_topic_query( 'costco credit card', $options ) );
+	}
+
+	public function test_off_topic_blocks_unrelated_query(): void {
+		$options = array( 'relevance_keywords' => "rivian\nr1t\nr1s\nev\nelectric vehicle" );
+		$this->assertTrue( $this->validator->is_off_topic_query( 'msi monitor amazon portugal', $options ) );
+	}
+
+	public function test_off_topic_blocks_person_name(): void {
+		$options = array( 'relevance_keywords' => "rivian\nr1t\nr1s" );
+		$this->assertTrue( $this->validator->is_off_topic_query( 'LOOMIS PATRICK', $options ) );
+	}
+
+	public function test_off_topic_blocks_unrelated_product(): void {
+		$options = array( 'relevance_keywords' => "rivian\nr1t\nr1s\nelectric vehicle" );
+		$this->assertTrue( $this->validator->is_off_topic_query( 'costco credit card application', $options ) );
+	}
+
+	public function test_off_topic_blocks_cable_product(): void {
+		$options = array( 'relevance_keywords' => "rivian\nr1t\nr1s" );
+		$this->assertTrue( $this->validator->is_off_topic_query( 'Cable HDMI a VGA 1.8M', $options ) );
+	}
+
+	public function test_off_topic_allows_rivian_query(): void {
+		$options = array( 'relevance_keywords' => "rivian\nr1t\nr1s\nev\nelectric vehicle" );
+		$this->assertFalse( $this->validator->is_off_topic_query( 'Rivian R1T review 2025', $options ) );
+	}
+
+	public function test_off_topic_allows_ev_keyword(): void {
+		$options = array( 'relevance_keywords' => "rivian\nr1t\nr1s\nev\nelectric vehicle" );
+		$this->assertFalse( $this->validator->is_off_topic_query( 'best ev charging stations', $options ) );
+	}
+
+	public function test_off_topic_allows_partial_match(): void {
+		$options = array( 'relevance_keywords' => "rivian\nbattery" );
+		$this->assertFalse( $this->validator->is_off_topic_query( 'rivian battery replacement cost', $options ) );
+	}
+
+	public function test_off_topic_case_insensitive(): void {
+		$options = array( 'relevance_keywords' => "Rivian\nR1T" );
+		$this->assertFalse( $this->validator->is_off_topic_query( 'rivian delivery update', $options ) );
+	}
+
+	public function test_off_topic_supports_comma_separated_keywords(): void {
+		$options = array( 'relevance_keywords' => 'rivian, r1t, r1s, ev' );
+		$this->assertFalse( $this->validator->is_off_topic_query( 'R1S range test', $options ) );
+		$this->assertTrue( $this->validator->is_off_topic_query( 'costco credit card', $options ) );
+	}
+
+	public function test_off_topic_exact_word_match(): void {
+		$options = array( 'relevance_keywords' => "ev" );
+		$this->assertFalse( $this->validator->is_off_topic_query( 'best ev trucks 2025', $options ) );
+	}
+
 	// --- Validate Search Query (combined) ---
 
 	public function test_rejects_empty_query(): void {

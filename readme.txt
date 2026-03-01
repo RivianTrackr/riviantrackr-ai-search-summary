@@ -4,7 +4,7 @@ Tags: search, ai, openai, anthropic, claude, summary, chatgpt
 Requires at least: 6.9
 Tested up to: 6.9
 Requires PHP: 8.4
-Stable tag: 1.3.0
+Stable tag: 1.3.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -175,6 +175,12 @@ The plugin is designed with privacy in mind:
 
 == Changelog ==
 
+= 1.3.1 =
+* Added: Relevance Keywords setting — define your site's topics to automatically block unrelated searches (e.g. "costco credit card", "msi monitor") from cluttering analytics
+* Added: Off-topic query filter with configurable keywords (comma or newline separated, case-insensitive)
+* Added: RIVIANTRACKR_ERROR_OFF_TOPIC error code for frontend-specific handling
+* Added: 12 unit tests for off-topic query detection
+
 = 1.3.0 =
 * Security: Progressive IP penalties — repeat rate-limit offenders face escalating bans (5min, 30min, 24hr) instead of a 60-second reset
 * Security: JS challenge token now mandatory by default — bots can no longer bypass by omitting the token parameters
@@ -297,6 +303,9 @@ The plugin is designed with privacy in mind:
 * Security headers and prepared statements
 
 == Upgrade Notice ==
+
+= 1.3.1 =
+Off-topic query filtering: configure Relevance Keywords in Settings to block unrelated searches from cluttering your analytics. Leave empty to keep existing behavior (all queries allowed).
 
 = 1.3.0 =
 Spam prevention release: progressive IP bans for repeat offenders, mandatory JS challenge token (configurable), honeypot bot trap, and duplicate query throttling. The "Require JavaScript Challenge" setting defaults to enabled — disable it in Settings only if you have custom API integrations.
