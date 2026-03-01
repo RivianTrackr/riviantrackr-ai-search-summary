@@ -9,8 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Skip Zero-Results Logging setting** — New toggle in Advanced Settings that prevents searches returning zero WordPress results from being logged to analytics. These are almost always spam, bot probes, or off-topic queries that slipped past pattern-based filters. Unlike a blocklist, this approach requires zero maintenance — any junk query that doesn't match real site content is automatically excluded without needing new terms added.
-- **Retroactive zero-result cleanup via Purge Spam** — When the setting is enabled, the "Scan & Remove Spam" button also deletes all existing zero-result log entries, cleaning up historical spam that was recorded before the option was turned on.
+- **"Hide zero-result queries" filter on Analytics dashboard** — A toggle button at the top of the Analytics page that filters zero-result entries out of all views (overview stats, daily stats, top queries, top errors, and recent events). Non-destructive — data stays in the database and reappears when the filter is toggled off. Uses the existing indexed `results_count` column so there is no performance cost. Useful for seeing clean analytics without spam, while preserving the ability to analyze content gaps when needed.
 
 ---
 
