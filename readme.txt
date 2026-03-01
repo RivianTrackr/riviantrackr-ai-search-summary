@@ -177,6 +177,7 @@ The plugin is designed with privacy in mind:
 
 = 1.3.5 =
 * Added: "Hide zero-result queries" filter toggle on the Analytics dashboard — non-destructively excludes zero-result entries from all analytics views without deleting data
+* Added: Filter preference is now sticky — remembers your choice across page loads via WordPress user meta (per-admin)
 
 = 1.3.4 =
 * Fixed: Automatic one-time cleanup of old off-topic entries from analytics on upgrade — removes junk logged before the filter existed
@@ -321,7 +322,7 @@ The plugin is designed with privacy in mind:
 == Upgrade Notice ==
 
 = 1.3.5 =
-New "Hide zero-result queries" filter on the Analytics dashboard. Click to toggle zero-result entries out of all views — non-destructive, data stays in the DB and reappears when you turn it off. Great for seeing clean analytics without spam noise.
+New "Hide zero-result queries" filter on the Analytics dashboard. Click to toggle zero-result entries out of all views — non-destructive, data stays in the DB and reappears when you turn it off. The filter now remembers your preference across page loads. Great for seeing clean analytics without spam noise.
 
 = 1.3.4 =
 Closes the last spam vector: the session cache hit logging endpoint now applies the same off-topic filter. Off-topic errors are also cached in the browser to avoid repeat REST calls.
