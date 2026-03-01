@@ -5,6 +5,15 @@ All notable changes to RivianTrackr AI Search Summary will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.5] - 2026-03-01
+
+### Added
+
+- **Skip Zero-Results Logging setting** — New toggle in Advanced Settings that prevents searches returning zero WordPress results from being logged to analytics. These are almost always spam, bot probes, or off-topic queries that slipped past pattern-based filters. Unlike a blocklist, this approach requires zero maintenance — any junk query that doesn't match real site content is automatically excluded without needing new terms added.
+- **Retroactive zero-result cleanup via Purge Spam** — When the setting is enabled, the "Scan & Remove Spam" button also deletes all existing zero-result log entries, cleaning up historical spam that was recorded before the option was turned on.
+
+---
+
 ## [1.3.4] - 2026-03-01
 
 ### Fixed

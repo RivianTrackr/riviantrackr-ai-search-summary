@@ -6,7 +6,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Plugin Name: AI Search Summary
  * Description: Add AI-powered summaries to WordPress search results using OpenAI or Anthropic Claude. Non-blocking, with analytics, cache control, and collapsible sources.
- * Version: 1.3.4
+ * Version: 1.3.5
  * Author: Jose Castillo
  * Author URI: https://github.com/RivianTrackr/
  * License: GPL v2 or later
@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Domain Path: /languages
  */
 
-define( 'RIVIANTRACKR_VERSION', '1.3.4' );
+define( 'RIVIANTRACKR_VERSION', '1.3.5' );
 
 // Load the namespaced class autoloader.
 require_once __DIR__ . '/includes/class-autoloader.php';
@@ -544,6 +544,7 @@ class RivianTrackr_AI_Search_Summary {
             'anonymize_queries'       => 0,
             'spam_blocklist'          => '',
             'relevance_keywords'      => '',
+            'skip_zero_results_logging' => 0,
             'require_bot_token'       => 1,
             'post_types'              => array(),
             'max_sources_display'     => RIVIANTRACKR_MAX_SOURCES_DISPLAY,
@@ -733,6 +734,9 @@ class RivianTrackr_AI_Search_Summary {
         } else {
             $output['relevance_keywords'] = '';
         }
+
+        // Skip logging zero-result searches (they are almost always spam/noise)
+        $output['skip_zero_results_logging'] = isset( $input['skip_zero_results_logging'] ) && $input['skip_zero_results_logging'] ? 1 : 0;
 
         // Require JS challenge token for bot prevention
         $output['require_bot_token'] = isset( $input['require_bot_token'] ) && $input['require_bot_token'] ? 1 : 0;
@@ -1011,6 +1015,7 @@ class RivianTrackr_AI_Search_Summary {
                     'auto_purge_days'      => 90,
                     'preserve_data_on_uninstall' => 0,
                     'anonymize_queries'    => 0,
+                    'skip_zero_results_logging' => 0,
                     'post_types'           => array(),
                     'max_sources_display'  => 5,
                     'content_length'       => 400,
@@ -1351,12 +1356,41 @@ class RivianTrackr_AI_Search_Summary {
             );
         }
 
+        // When skip-zero-results logging is on, also purge existing zero-result
+        // entries — these are overwhelmingly spam that was logged before the
+        // option was enabled.
+        $zero_deleted = 0;
+        if ( ! empty( $options['skip_zero_results_logging'] ) ) {
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+            $rows = $wpdb->query(
+                $wpdb->prepare(
+                    'DELETE FROM %i WHERE results_count = 0',
+                    $table_name
+                )
+            );
+            if ( is_int( $rows ) ) {
+                $zero_deleted = $rows;
+            }
+        }
+
         // Clear the analytics cache so stats refresh
         delete_transient( 'riviantrackr_analytics_overview' );
 
+        $total_deleted = $deleted + $zero_deleted;
+        $parts         = array();
+        if ( $deleted > 0 ) {
+            $parts[] = number_format( $deleted ) . ' spam entries across ' . count( $spam_queries ) . ' queries';
+        }
+        if ( $zero_deleted > 0 ) {
+            $parts[] = number_format( $zero_deleted ) . ' zero-result entries';
+        }
+        $message = ! empty( $parts )
+            ? 'Deleted ' . implode( ' and ', $parts ) . '.'
+            : 'No spam entries detected in the logs.';
+
         wp_send_json_success( array(
-            'message' => number_format( $deleted ) . ' spam log entries deleted across ' . count( $spam_queries ) . ' spam queries.',
-            'deleted' => $deleted,
+            'message' => $message,
+            'deleted' => $total_deleted,
             'queries' => count( $spam_queries ),
         ) );
     }
@@ -2678,6 +2712,28 @@ class RivianTrackr_AI_Search_Summary {
                             </div>
                         </div>
 
+                        <!-- Skip Zero-Results Logging -->
+                        <div class="riviantrackr-field">
+                            <div class="riviantrackr-field-label">
+                                <label>Skip Zero-Results Logging</label>
+                            </div>
+                            <div class="riviantrackr-field-description">
+                                Don't log searches that return zero WordPress results. These are almost always spam, bot probes, or off-topic queries that slipped past pattern filters. Enabling this keeps your analytics clean without needing to maintain a growing blocklist. Disable if you want to track content gaps (queries your site doesn't cover yet).
+                            </div>
+                            <div class="riviantrackr-toggle-wrapper">
+                                <label class="riviantrackr-toggle">
+                                    <input type="checkbox"
+                                           name="<?php echo esc_attr( $this->option_name ); ?>[skip_zero_results_logging]"
+                                           value="1"
+                                           <?php checked( ! empty( $options['skip_zero_results_logging'] ), true ); ?> />
+                                    <span class="riviantrackr-toggle-slider"></span>
+                                </label>
+                                <span class="riviantrackr-toggle-label">
+                                    <?php echo ! empty( $options['skip_zero_results_logging'] ) ? 'Enabled' : 'Disabled'; ?>
+                                </span>
+                            </div>
+                        </div>
+
                         <!-- Require JS Challenge Token -->
                         <div class="riviantrackr-field">
                             <div class="riviantrackr-field-label">
@@ -3971,6 +4027,12 @@ class RivianTrackr_AI_Search_Summary {
             return;
         }
 
+        // When enabled, skip logging zero-result searches entirely — they are
+        // almost always spam or off-topic noise that passed pattern filters.
+        if ( ! empty( $options['skip_zero_results_logging'] ) ) {
+            return;
+        }
+
         $this->log_search_event( $search_query, 0, 0, 'No matching articles found', null );
     }
 
@@ -4636,7 +4698,9 @@ class RivianTrackr_AI_Search_Summary {
         if ( 0 === $results_count ) {
             $site_name = ! empty( $options['site_name'] ) ? $options['site_name'] : get_bloginfo( 'name' );
 
-            $this->log_search_event( $search_query, 0, 0, 'No matching posts found' );
+            if ( empty( $options['skip_zero_results_logging'] ) ) {
+                $this->log_search_event( $search_query, 0, 0, 'No matching posts found' );
+            }
 
             return rest_ensure_response(
                 array(

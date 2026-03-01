@@ -4,7 +4,7 @@ Tags: search, ai, openai, anthropic, claude, summary, chatgpt
 Requires at least: 6.9
 Tested up to: 6.9
 Requires PHP: 8.4
-Stable tag: 1.3.4
+Stable tag: 1.3.5
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -175,6 +175,10 @@ The plugin is designed with privacy in mind:
 
 == Changelog ==
 
+= 1.3.5 =
+* Added: "Skip Zero-Results Logging" toggle — automatically excludes searches that return zero WordPress results from analytics, eliminating spam without maintaining a growing blocklist
+* Added: "Scan & Remove Spam" button now also purges existing zero-result entries when the setting is enabled
+
 = 1.3.4 =
 * Fixed: Automatic one-time cleanup of old off-topic entries from analytics on upgrade — removes junk logged before the filter existed
 * Fixed: "Scan & Remove Spam" button now also purges off-topic queries (based on Relevance Keywords)
@@ -316,6 +320,9 @@ The plugin is designed with privacy in mind:
 * Security headers and prepared statements
 
 == Upgrade Notice ==
+
+= 1.3.5 =
+New "Skip Zero-Results Logging" setting: enable it in Advanced Settings to automatically keep spam out of analytics without maintaining a blocklist. Works because spam queries never match real site content. Run "Scan & Remove Spam" after enabling to clean up existing junk entries.
 
 = 1.3.4 =
 Closes the last spam vector: the session cache hit logging endpoint now applies the same off-topic filter. Off-topic errors are also cached in the browser to avoid repeat REST calls.
