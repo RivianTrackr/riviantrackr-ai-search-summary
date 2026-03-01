@@ -135,7 +135,11 @@
         container.appendChild(errorP);
       }
       // Log session cache hit to analytics (fire and forget)
-      logSessionCacheHit(q, cached.results_count);
+      // Skip logging for off-topic cached responses — they should never appear in analytics.
+      var offTopicCode = (window.RivianTrackrAI && window.RivianTrackrAI.errorCodes && window.RivianTrackrAI.errorCodes.offTopic) || 'off_topic';
+      if (cached.error_code !== offTopicCode) {
+        logSessionCacheHit(q, cached.results_count);
+      }
       return;
     }
 
@@ -227,9 +231,10 @@
         }
 
         if (data && data.error) {
-          // Cache no-results responses so we don't re-hit the server
-          var noResultsCode = (window.RivianTrackrAI && window.RivianTrackrAI.errorCodes && window.RivianTrackrAI.errorCodes.noResults) || 'no_results';
-          if (data.error_code === noResultsCode) {
+          // Cache no-results and off-topic responses so we don't re-hit the server
+          var errorCodes = (window.RivianTrackrAI && window.RivianTrackrAI.errorCodes) || {};
+          var cacheableErrors = [errorCodes.noResults || 'no_results', errorCodes.offTopic || 'off_topic'];
+          if (cacheableErrors.indexOf(data.error_code) !== -1) {
             saveToCache(q, data);
           }
           var errorP = document.createElement('p');
