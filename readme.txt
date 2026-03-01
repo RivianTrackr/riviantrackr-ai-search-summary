@@ -4,7 +4,7 @@ Tags: search, ai, openai, anthropic, claude, summary, chatgpt
 Requires at least: 6.9
 Tested up to: 6.9
 Requires PHP: 8.4
-Stable tag: 1.3.3
+Stable tag: 1.3.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -175,6 +175,11 @@ The plugin is designed with privacy in mind:
 
 == Changelog ==
 
+= 1.3.4 =
+* Fixed: Session cache hit endpoint (/log-session-hit) now applies off-topic filtering — previously any query could be logged to analytics via this endpoint
+* Fixed: Off-topic error responses are now cached in the browser so repeat searches don't re-hit the server
+* Fixed: Cached off-topic responses no longer trigger session cache hit logging
+
 = 1.3.3 =
 * Fixed: Off-topic queries no longer logged to analytics — previously the REST endpoint still called log_search_event() before returning the off-topic error, polluting analytics with the junk it was supposed to block
 
@@ -309,6 +314,9 @@ The plugin is designed with privacy in mind:
 * Security headers and prepared statements
 
 == Upgrade Notice ==
+
+= 1.3.4 =
+Closes the last spam vector: the session cache hit logging endpoint now applies the same off-topic filter. Off-topic errors are also cached in the browser to avoid repeat REST calls.
 
 = 1.3.3 =
 Off-topic queries are now fully silent — they are blocked and not logged to analytics at all. Previously the off-topic filter still recorded the junk query before returning the error.

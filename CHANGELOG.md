@@ -5,6 +5,16 @@ All notable changes to RivianTrackr AI Search Summary will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.4] - 2026-03-01
+
+### Fixed
+
+- **Session cache hit endpoint now filters off-topic queries** — The `/log-session-hit` endpoint (`rest_log_session_cache_hit()`) had no off-topic check, allowing junk queries to be logged to analytics via this path. A bot could POST directly to the endpoint, or the frontend JS could log a cached error response. The endpoint now applies `is_off_topic_query()` and silently drops matching queries.
+- **Off-topic errors now cached in browser** — The frontend JS previously only cached `no_results` errors in `sessionStorage`. Off-topic errors were not cached, so navigating back to the same off-topic search page would re-fire the REST endpoint every time. Off-topic errors are now cached alongside no-results, preventing repeat requests.
+- **Cached off-topic responses skip session cache hit logging** — When serving a cached off-topic error from `sessionStorage`, the JS no longer calls `logSessionCacheHit()`, preventing the junk query from reaching the `/log-session-hit` endpoint.
+
+---
+
 ## [1.3.3] - 2026-03-01
 
 ### Fixed
