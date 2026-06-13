@@ -4,7 +4,7 @@ Tags: search, ai, openai, anthropic, claude, summary, chatgpt
 Requires at least: 6.9
 Tested up to: 7.0
 Requires PHP: 8.4
-Stable tag: 1.5.0
+Stable tag: 1.5.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -174,6 +174,9 @@ The plugin is designed with privacy in mind:
 6. WordPress dashboard widget with quick stats
 
 == Changelog ==
+
+= 1.5.1 =
+* Fixed: Fatal error ("Call to undefined method ... bump_cache_namespace") when saving settings with a cache-invalidating change (model, sources, max tokens). Latent since the v1.2.0 refactor.
 
 = 1.5.0 =
 * Changed: Restyled the summary card to the new "ink & brass" dark theme matching riviantrackr.com — near-neutral charcoal surfaces, warm-neutral text, gold accent unchanged. Color setting defaults updated; installs with previously saved colors keep them until reset.
