@@ -5,6 +5,13 @@ All notable changes to RivianTrackr AI Search Summary will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-06-12
+
+### Changed
+- **Restyled to the "ink & brass" dark theme**, matching the sitewide refresh on riviantrackr.com. Navy/slate values in the design tokens, skeleton shimmer, spinner track, and OpenAI-style badge are replaced with near-neutral charcoal surfaces (`#16191e` card, `#121418` deep, `#3a3e45` borders/inputs) and warm-neutral text (`#ece9e4`); star-empty becomes `#2c2f34`. The gold accent and the signature brand gradient are unchanged; `--rtg-accent-hover` now uses the spec hover value `#ffbe4a`.
+- **Color setting defaults updated** (background, text, border) in the settings page and the inline CSS generator fallbacks. Installs with previously saved custom colors keep their saved values until reset on the settings page.
+- Updated `CLAUDE.md` dark-theme primitives to document the new palette.
+
 ## [1.4.3] - 2026-05-25
 
 ### Changed

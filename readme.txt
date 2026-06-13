@@ -4,7 +4,7 @@ Tags: search, ai, openai, anthropic, claude, summary, chatgpt
 Requires at least: 6.9
 Tested up to: 7.0
 Requires PHP: 8.4
-Stable tag: 1.4.3
+Stable tag: 1.5.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -174,6 +174,9 @@ The plugin is designed with privacy in mind:
 6. WordPress dashboard widget with quick stats
 
 == Changelog ==
+
+= 1.5.0 =
+* Changed: Restyled the summary card to the new "ink & brass" dark theme matching riviantrackr.com — near-neutral charcoal surfaces, warm-neutral text, gold accent unchanged. Color setting defaults updated; installs with previously saved colors keep them until reset.
 
 = 1.4.3 =
 * Compatibility: Tested and confirmed compatible with WordPress 7.0. Bumped "Tested up to" to 7.0.
