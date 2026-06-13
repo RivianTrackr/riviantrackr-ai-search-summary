@@ -6,7 +6,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Plugin Name: AI Search Summary
  * Description: Add AI-powered summaries to WordPress search results using OpenAI or Anthropic Claude. Non-blocking, with analytics, cache control, and collapsible sources.
- * Version: 1.4.3
+ * Version: 1.5.0
  * Author: RivianTrackr
  * Author URI: https://github.com/RivianTrackr/
  * License: GPL v2 or later
@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Domain Path: /languages
  */
 
-define( 'RIVIANTRACKR_VERSION', '1.4.3' );
+define( 'RIVIANTRACKR_VERSION', '1.5.0' );
 define( 'RIVIANTRACKR_ASSET_SUFFIX', defined( 'SCRIPT_DEBUG' ) && SCRIPT_DEBUG ? '' : '.min' );
 
 // Load the namespaced class autoloader.
@@ -537,10 +537,10 @@ class RivianTrackr_AI_Search_Summary {
             'show_openai_badge'    => 0,
             'show_sources'         => 0,
             'show_feedback'        => 0,
-            'color_background'     => '#121e2b',
-            'color_text'           => '#e5e7eb',
+            'color_background'     => '#16191e',
+            'color_text'           => '#ece9e4',
             'color_accent'         => '#fba919',
-            'color_border'         => '#374151',
+            'color_border'         => '#3a3e45',
             'custom_css'              => '',
             'allow_reasoning_models'  => 0,
             'anonymize_queries'       => 0,
@@ -697,10 +697,10 @@ class RivianTrackr_AI_Search_Summary {
         $output['show_feedback'] = isset($input['show_feedback']) && $input['show_feedback'] ? 1 : 0;
 
         // Color settings
-        $output['color_background'] = isset($input['color_background']) ? $this->sanitize_color($input['color_background'], '#121e2b') : '#121e2b';
-        $output['color_text'] = isset($input['color_text']) ? $this->sanitize_color($input['color_text'], '#e5e7eb') : '#e5e7eb';
+        $output['color_background'] = isset($input['color_background']) ? $this->sanitize_color($input['color_background'], '#16191e') : '#16191e';
+        $output['color_text'] = isset($input['color_text']) ? $this->sanitize_color($input['color_text'], '#ece9e4') : '#ece9e4';
         $output['color_accent'] = isset($input['color_accent']) ? $this->sanitize_color($input['color_accent'], '#fba919') : '#fba919';
-        $output['color_border'] = isset($input['color_border']) ? $this->sanitize_color($input['color_border'], '#374151') : '#374151';
+        $output['color_border'] = isset($input['color_border']) ? $this->sanitize_color($input['color_border'], '#3a3e45') : '#3a3e45';
 
         $output['custom_css'] = isset($input['custom_css']) ? $this->sanitize_custom_css($input['custom_css']) : '';
         $output['allow_reasoning_models'] = isset($input['allow_reasoning_models']) && $input['allow_reasoning_models'] ? 1 : 0;
@@ -851,10 +851,10 @@ class RivianTrackr_AI_Search_Summary {
      * @return string CSS string.
      */
     private function generate_color_css( array $options ): string {
-        $bg     = isset( $options['color_background'] ) ? $options['color_background'] : '#121e2b';
-        $text   = isset( $options['color_text'] ) ? $options['color_text'] : '#e5e7eb';
+        $bg     = isset( $options['color_background'] ) ? $options['color_background'] : '#16191e';
+        $text   = isset( $options['color_text'] ) ? $options['color_text'] : '#ece9e4';
         $accent = isset( $options['color_accent'] ) ? $options['color_accent'] : '#fba919';
-        $border = isset( $options['color_border'] ) ? $options['color_border'] : '#374151';
+        $border = isset( $options['color_border'] ) ? $options['color_border'] : '#3a3e45';
 
         // Convert hex to rgba for semi-transparent backgrounds
         $bg_rgb = $this->hex_to_rgb( $bg );
@@ -880,7 +880,7 @@ class RivianTrackr_AI_Search_Summary {
 }
 .riviantrackr-openai-badge,
 .riviantrackr-openai-badge .riviantrackr-openai-text {
-    color: #e5e7eb;
+    color: #ece9e4;
 }
 .riviantrackr-search-summary-content {
     color: {$text};
@@ -1717,7 +1717,7 @@ class RivianTrackr_AI_Search_Summary {
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  border: 2px solid rgba(55,65,81,0.5);
+  border: 2px solid rgba(58,62,69,0.5);
   border-top-color: #fba919;
   display: inline-block;
   animation: riviantrackr-spin 0.7s linear infinite;
@@ -1739,8 +1739,8 @@ class RivianTrackr_AI_Search_Summary {
   gap: 0.35rem;
   padding: 0.15rem 0.55rem;
   border-radius: 999px;
-  border: 1px solid #374151;
-  background: #0f1a26;
+  border: 1px solid #3a3e45;
+  background: #121418;
   font-size: 0.7rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -1752,7 +1752,7 @@ class RivianTrackr_AI_Search_Summary {
   width: 10px;
   height: 10px;
   border-radius: 999px;
-  border: 1px solid #374151;
+  border: 1px solid #3a3e45;
   position: relative;
   flex-shrink: 0;
 }
@@ -1780,7 +1780,7 @@ class RivianTrackr_AI_Search_Summary {
   text-decoration: underline;
   text-underline-offset: 2px;
   opacity: 0.95;
-  color: #e5e7eb;
+  color: #ece9e4;
 }
 
 .riviantrackr-sources-list {
@@ -1810,7 +1810,7 @@ class RivianTrackr_AI_Search_Summary {
 .riviantrackr-sources-list span {
   display: block;
   opacity: 0.8;
-  color: #e5e7eb;
+  color: #ece9e4;
 }';
     }
 
@@ -2677,14 +2677,14 @@ class RivianTrackr_AI_Search_Summary {
                                 <label for="riviantrackr-color-background">Background Color</label>
                             </div>
                             <div class="riviantrackr-field-description">
-                                Hex color code (e.g. #121e2b)
+                                Hex color code (e.g. #16191e)
                             </div>
                             <div class="riviantrackr-field-input">
                                 <input type="text"
                                        id="riviantrackr-color-background"
                                        name="<?php echo esc_attr( $this->option_name ); ?>[color_background]"
-                                       value="<?php echo esc_attr( isset( $options['color_background'] ) ? $options['color_background'] : '#121e2b' ); ?>"
-                                       placeholder="#121e2b" />
+                                       value="<?php echo esc_attr( isset( $options['color_background'] ) ? $options['color_background'] : '#16191e' ); ?>"
+                                       placeholder="#16191e" />
                             </div>
                         </div>
                         <div class="riviantrackr-field">
@@ -2695,8 +2695,8 @@ class RivianTrackr_AI_Search_Summary {
                                 <input type="text"
                                        id="riviantrackr-color-text"
                                        name="<?php echo esc_attr( $this->option_name ); ?>[color_text]"
-                                       value="<?php echo esc_attr( isset( $options['color_text'] ) ? $options['color_text'] : '#e5e7eb' ); ?>"
-                                       placeholder="#e5e7eb" />
+                                       value="<?php echo esc_attr( isset( $options['color_text'] ) ? $options['color_text'] : '#ece9e4' ); ?>"
+                                       placeholder="#ece9e4" />
                             </div>
                         </div>
                         <div class="riviantrackr-field">
@@ -2722,8 +2722,8 @@ class RivianTrackr_AI_Search_Summary {
                                 <input type="text"
                                        id="riviantrackr-color-border"
                                        name="<?php echo esc_attr( $this->option_name ); ?>[color_border]"
-                                       value="<?php echo esc_attr( isset( $options['color_border'] ) ? $options['color_border'] : '#374151' ); ?>"
-                                       placeholder="#374151" />
+                                       value="<?php echo esc_attr( isset( $options['color_border'] ) ? $options['color_border'] : '#3a3e45' ); ?>"
+                                       placeholder="#3a3e45" />
                             </div>
                         </div>
 
@@ -3065,7 +3065,7 @@ class RivianTrackr_AI_Search_Summary {
                         &laquo; Previous
                     </a>
                 <?php else : ?>
-                    <span style="display: inline-block; padding: 8px 16px; font-size: 13px; font-weight: 500; color: #9ca3af; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; cursor: not-allowed;">
+                    <span style="display: inline-block; padding: 8px 16px; font-size: 13px; font-weight: 500; color: #9ca3af; background: #f9fafb; border: 1px solid #ece9e4; border-radius: 6px; cursor: not-allowed;">
                         &laquo; Previous
                     </span>
                 <?php endif; ?>
@@ -3076,7 +3076,7 @@ class RivianTrackr_AI_Search_Summary {
                         Next &raquo;
                     </a>
                 <?php else : ?>
-                    <span style="display: inline-block; padding: 8px 16px; font-size: 13px; font-weight: 500; color: #9ca3af; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; cursor: not-allowed;">
+                    <span style="display: inline-block; padding: 8px 16px; font-size: 13px; font-weight: 500; color: #9ca3af; background: #f9fafb; border: 1px solid #ece9e4; border-radius: 6px; cursor: not-allowed;">
                         Next &raquo;
                     </span>
                 <?php endif; ?>
@@ -3289,7 +3289,7 @@ class RivianTrackr_AI_Search_Summary {
         ?>
 
         <!-- Filter Bar -->
-        <div style="margin-bottom: 16px; padding: 10px 16px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; display: flex; align-items: center; gap: 8px;">
+        <div style="margin-bottom: 16px; padding: 10px 16px; background: #f9fafb; border: 1px solid #ece9e4; border-radius: 8px; display: flex; align-items: center; gap: 8px;">
             <?php
             $filter_url = admin_url( 'admin.php?page=riviantrackr-analytics' );
             if ( $hide_zero ) {
@@ -3380,8 +3380,8 @@ class RivianTrackr_AI_Search_Summary {
         </div>
 
         <!-- Badge Legend -->
-        <div style="margin-bottom: 16px; padding: 12px 16px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; font-size: 12px; color: #6e6e73; display: flex; flex-wrap: wrap; gap: 16px; align-items: center;">
-            <span style="font-weight: 600; color: #374151;">Badge Thresholds:</span>
+        <div style="margin-bottom: 16px; padding: 12px 16px; background: #f9fafb; border: 1px solid #ece9e4; border-radius: 8px; font-size: 12px; color: #6e6e73; display: flex; flex-wrap: wrap; gap: 16px; align-items: center;">
+            <span style="font-weight: 600; color: #3a3e45;">Badge Thresholds:</span>
             <span><span class="riviantrackr-badge riviantrackr-badge-success" style="font-size: 11px; padding: 2px 6px;">AI Success</span> &ge;<?php echo esc_html( RIVIANTRACKR_BADGE_SUCCESS_HIGH ); ?>%</span>
             <span><span class="riviantrackr-badge riviantrackr-badge-warning" style="font-size: 11px; padding: 2px 6px;">AI Success</span> &ge;<?php echo esc_html( RIVIANTRACKR_BADGE_SUCCESS_MED ); ?>%</span>
             <span><span class="riviantrackr-badge riviantrackr-badge-success" style="font-size: 11px; padding: 2px 6px;">Cache</span> &ge;<?php echo esc_html( RIVIANTRACKR_BADGE_CACHE_HIGH ); ?>%</span>
