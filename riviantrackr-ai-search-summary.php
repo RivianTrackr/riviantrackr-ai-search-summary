@@ -6,7 +6,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Plugin Name: AI Search Summary
  * Description: Add AI-powered summaries to WordPress search results using OpenAI or Anthropic Claude. Non-blocking, with analytics, cache control, and collapsible sources.
- * Version: 1.5.0
+ * Version: 1.5.1
  * Author: RivianTrackr
  * Author URI: https://github.com/RivianTrackr/
  * License: GPL v2 or later
@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Domain Path: /languages
  */
 
-define( 'RIVIANTRACKR_VERSION', '1.5.0' );
+define( 'RIVIANTRACKR_VERSION', '1.5.1' );
 define( 'RIVIANTRACKR_ASSET_SUFFIX', defined( 'SCRIPT_DEBUG' ) && SCRIPT_DEBUG ? '' : '.min' );
 
 // Load the namespaced class autoloader.
@@ -802,7 +802,7 @@ class RivianTrackr_AI_Search_Summary {
         }
 
         if ( $cache_invalidating_change ) {
-            $this->bump_cache_namespace();
+            $this->cache_manager->bump_namespace();
         }
 
         $this->flush_options_cache();
