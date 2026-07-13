@@ -8,32 +8,12 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 /**
- * Handles communication with OpenAI and Anthropic APIs.
+ * Handles communication with the Anthropic API.
  *
  * Includes prompt construction, request execution with retry logic,
  * and response normalization.
  */
 class ApiHandler {
-
-	/**
-	 * Known reasoning models that require special token parameters.
-	 */
-	private const REASONING_MODELS = array( 'o1', 'o3', 'o4' );
-
-	/**
-	 * Check if a model is a reasoning model.
-	 *
-	 * @param string $model Model ID.
-	 * @return bool
-	 */
-	public static function is_reasoning_model( string $model ): bool {
-		foreach ( self::REASONING_MODELS as $prefix ) {
-			if ( strpos( $model, $prefix ) === 0 ) {
-				return true;
-			}
-		}
-		return false;
-	}
 
 	/**
 	 * Build the system prompt for AI search.
@@ -96,83 +76,6 @@ class ApiHandler {
 	}
 
 	/**
-	 * Call the OpenAI API with retry logic.
-	 *
-	 * @param string $api_key   API key.
-	 * @param string $model     Model ID.
-	 * @param string $query     User search query.
-	 * @param array  $posts     Posts data for context.
-	 * @param array  $options   Plugin options.
-	 * @return array API response or array with 'error' key.
-	 */
-	public function call_openai( string $api_key, string $model, string $query, array $posts, array $options ): array {
-		if ( empty( $api_key ) ) {
-			return array( 'error' => 'API key is missing. Please configure the plugin settings.' );
-		}
-
-		$endpoint = 'https://api.openai.com/v1/chat/completions';
-
-		$posts_text = $this->format_posts_for_prompt( $posts );
-		$site_name  = ! empty( $options['site_name'] ) ? $options['site_name'] : get_bloginfo( 'name' );
-		$site_desc  = ! empty( $options['site_description'] ) ? $options['site_description'] : '';
-
-		$system_message = $this->build_system_prompt( $site_name, $site_desc );
-		$user_message   = "User search query: {$query}\n\nHere are the posts from the site (with newer posts listed first where possible):\n\n{$posts_text}";
-
-		$is_reasoning = self::is_reasoning_model( $model );
-
-		$supports_response_format = (
-			strpos( $model, 'gpt-4o' ) === 0 ||
-			strpos( $model, 'gpt-4.1' ) === 0
-		);
-
-		$body = array(
-			'model'    => $model,
-			'messages' => array(
-				array(
-					'role'    => 'system',
-					'content' => $system_message,
-				),
-				array(
-					'role'    => 'user',
-					'content' => $user_message,
-				),
-			),
-		);
-
-		$configured_tokens = isset( $options['max_tokens'] ) ? (int) $options['max_tokens'] : RIVIANTRACKR_MAX_TOKENS;
-
-		if ( $is_reasoning ) {
-			$body['max_completion_tokens'] = max( $configured_tokens, 16000 );
-		} else {
-			$body['max_tokens'] = $configured_tokens;
-		}
-
-		if ( ! $is_reasoning ) {
-			$body['temperature'] = 0.2;
-		}
-
-		if ( $supports_response_format ) {
-			$body['response_format'] = array( 'type' => 'json_object' );
-		}
-
-		$args = array(
-			'headers' => array(
-				'Authorization' => 'Bearer ' . $api_key,
-				'Content-Type'  => 'application/json',
-			),
-			'body'    => wp_json_encode( $body ),
-			'timeout' => isset( $options['request_timeout'] ) ? (int) $options['request_timeout'] : RIVIANTRACKR_API_TIMEOUT,
-		);
-
-		return $this->execute_with_retry(
-			function () use ( $endpoint, $args ) {
-				return $this->make_openai_request( $endpoint, $args );
-			}
-		);
-	}
-
-	/**
 	 * Call the Anthropic Claude API with retry logic.
 	 *
 	 * @param string $api_key   API key.
@@ -207,6 +110,13 @@ class ApiHandler {
 					'role'    => 'user',
 					'content' => $user_message,
 				),
+				// Prefill the assistant turn with an opening brace so the model
+				// continues with pure JSON (no prose preamble or markdown fences).
+				// normalize_anthropic_response() prepends the brace back.
+				array(
+					'role'    => 'assistant',
+					'content' => '{',
+				),
 			),
 		);
 
@@ -223,19 +133,17 @@ class ApiHandler {
 		return $this->execute_with_retry(
 			function () use ( $endpoint, $args ) {
 				return $this->make_anthropic_request( $endpoint, $args );
-			},
-			true // normalize Anthropic response
+			}
 		);
 	}
 
 	/**
 	 * Execute an API request with retry logic.
 	 *
-	 * @param callable $request_fn         Function that returns a result array.
-	 * @param bool     $normalize_anthropic Whether to normalize the response format.
-	 * @return array API response.
+	 * @param callable $request_fn Function that returns a result array.
+	 * @return array Normalized API response.
 	 */
-	private function execute_with_retry( callable $request_fn, bool $normalize_anthropic = false ): array {
+	private function execute_with_retry( callable $request_fn ): array {
 		$max_retries = 2;
 		$attempt     = 0;
 		$last_error  = null;
@@ -244,11 +152,7 @@ class ApiHandler {
 			$result = $request_fn();
 
 			if ( isset( $result['success'] ) && $result['success'] ) {
-				$data = $result['data'];
-
-				if ( $normalize_anthropic ) {
-					$data = $this->normalize_anthropic_response( $data );
-				}
+				$data = $this->normalize_anthropic_response( $result['data'] );
 
 				if ( $attempt > 0 ) {
 					$data['_retry_count'] = $attempt;
@@ -285,10 +189,11 @@ class ApiHandler {
 	}
 
 	/**
-	 * Normalize Anthropic response to OpenAI-compatible format.
+	 * Normalize an Anthropic response to the internal chat-completion format
+	 * consumed by parse_ai_content().
 	 *
 	 * @param array $api_data Raw Anthropic response.
-	 * @return array OpenAI-compatible format.
+	 * @return array Normalized format.
 	 */
 	private function normalize_anthropic_response( array $api_data ): array {
 		$content_text = '';
@@ -298,6 +203,13 @@ class ApiHandler {
 					$content_text .= $block['text'];
 				}
 			}
+		}
+
+		// call_anthropic() prefills the assistant turn with '{' — the API
+		// response continues after it, so restore the brace unless the model
+		// somehow returned a full JSON object anyway.
+		if ( $content_text !== '' && $content_text[0] !== '{' ) {
+			$content_text = '{' . $content_text;
 		}
 
 		$stop_reason   = isset( $api_data['stop_reason'] ) ? $api_data['stop_reason'] : 'end_turn';
@@ -317,30 +229,6 @@ class ApiHandler {
 				),
 			),
 		);
-	}
-
-	/**
-	 * Make an HTTP request to OpenAI.
-	 *
-	 * @param string $endpoint API endpoint URL.
-	 * @param array  $args     wp_remote_post args.
-	 * @return array{success: bool, data?: array, error?: string, retryable?: bool}
-	 */
-	private function make_openai_request( string $endpoint, array $args ): array {
-		$response = wp_safe_remote_post( $endpoint, $args );
-
-		if ( is_wp_error( $response ) ) {
-			return $this->handle_connection_error( $response );
-		}
-
-		$code = wp_remote_retrieve_response_code( $response );
-		$body = wp_remote_retrieve_body( $response );
-
-		if ( $code < 200 || $code >= 300 ) {
-			return $this->handle_http_error( $code, $body, 'OpenAI' );
-		}
-
-		return $this->parse_json_response( $body );
 	}
 
 	/**
@@ -558,7 +446,20 @@ class ApiHandler {
 		}
 
 		if ( ! is_array( $decoded ) ) {
-			$ai_error = 'Could not parse AI response. The service may be experiencing issues.';
+			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+				$raw_sample = is_string( $raw_content ) ? substr( $raw_content, 0, 2000 ) : wp_json_encode( $raw_content );
+				// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+				error_log( '[RivianTrackr AI Search Summary] Could not parse AI content. Raw content (first 2000 chars): ' . $raw_sample );
+			}
+
+			// A response cut off at the max_tokens limit produces invalid JSON.
+			// Surface that specifically so it isn't mistaken for a service issue.
+			$finish_reason = $api_response['choices'][0]['finish_reason'] ?? '';
+			if ( $finish_reason === 'length' ) {
+				$ai_error = 'The AI response was truncated before completing. Increase the Max Response Tokens setting.';
+			} else {
+				$ai_error = 'Could not parse AI response. The service may be experiencing issues.';
+			}
 			return null;
 		}
 
@@ -582,59 +483,6 @@ class ApiHandler {
 		}
 
 		return $decoded;
-	}
-
-	/**
-	 * Test an OpenAI API key.
-	 *
-	 * @param string $api_key API key to test.
-	 * @return array{success: bool, message: string, models?: string[]}
-	 */
-	public function test_openai_key( string $api_key ): array {
-		$response = wp_safe_remote_get(
-			'https://api.openai.com/v1/models',
-			array(
-				'headers' => array( 'Authorization' => 'Bearer ' . $api_key ),
-				'timeout' => 15,
-			)
-		);
-
-		if ( is_wp_error( $response ) ) {
-			return array(
-				'success' => false,
-				'message' => 'Connection error: ' . $response->get_error_message(),
-			);
-		}
-
-		$code = wp_remote_retrieve_response_code( $response );
-		if ( $code !== 200 ) {
-			return array(
-				'success' => false,
-				'message' => 'API returned HTTP ' . $code,
-			);
-		}
-
-		$body = json_decode( wp_remote_retrieve_body( $response ), true );
-		if ( ! is_array( $body ) || empty( $body['data'] ) ) {
-			return array(
-				'success' => false,
-				'message' => 'Unexpected API response format.',
-			);
-		}
-
-		$models = array();
-		foreach ( $body['data'] as $m ) {
-			if ( isset( $m['id'] ) ) {
-				$models[] = $m['id'];
-			}
-		}
-		sort( $models );
-
-		return array(
-			'success' => true,
-			'message' => 'API key is valid.',
-			'models'  => $models,
-		);
 	}
 
 	/**

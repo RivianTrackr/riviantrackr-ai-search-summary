@@ -5,6 +5,21 @@ All notable changes to RivianTrackr AI Search Summary will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-07-13
+
+### Removed
+- **OpenAI support.** The plugin is now Anthropic Claude only. The provider selector, OpenAI API key field (`api_key` option and `RIVIANTRACKR_API_KEY` constant), OpenAI model fetching/caching, the reasoning-models setting, and `ApiHandler::call_openai()` / `is_reasoning_model()` are all removed. A one-time migration renames `show_openai_badge` to `show_badge`, drops the removed option keys and the OpenAI model cache, clears any non-Claude model selection, and bumps the summary cache namespace. The badge CSS classes are renamed from `.riviantrackr-openai-*` to `.riviantrackr-ai-*` (update any custom CSS targeting them).
+
+### Fixed
+- **Truncated responses were misreported as parse failures.** A Claude response cut off at the `max_tokens` limit produces invalid JSON, which surfaced as "Could not parse AI response. The service may be experiencing issues." — hiding the real cause. `parse_ai_content()` now checks the finish reason on decode failure and reports "The AI response was truncated… Increase the Max Response Tokens setting." instead, and logs the first 2000 chars of the raw content when `WP_DEBUG` is on.
+
+### Added
+- **Assistant prefill for guaranteed JSON.** Anthropic requests now prefill the assistant turn with `{`, the Claude-native equivalent of OpenAI's `response_format: json_object` — the model continues with pure JSON instead of possibly wrapping it in prose or markdown fences. The brace is restored during response normalization.
+- **Admin bypass for anti-abuse throttles.** Logged-in users with `manage_options` skip bot detection, the honeypot/JS-challenge checks, per-IP rate limiting, and the 5-minute duplicate-query throttle on the `/summary` endpoint, so site owners can test repeatedly without self-inflicted 429s (and without risking the progressive 24-hour IP ban).
+
+### Changed
+- **Default Max Response Tokens raised from 1,500 to 4,000.** The old default was tuned for the OpenAI path and routinely truncated Claude's summary-plus-sources JSON.
+
 ## [1.5.1] - 2026-06-12
 
 ### Fixed

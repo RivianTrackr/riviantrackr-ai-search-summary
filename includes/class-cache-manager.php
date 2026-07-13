@@ -14,7 +14,6 @@ class CacheManager {
 
 	private string $cache_keys_option      = 'riviantrackr_cache_keys';
 	private string $cache_namespace_option = 'riviantrackr_cache_namespace';
-	private string $models_cache_option    = 'riviantrackr_models_cache';
 	private string $cache_prefix;
 	private int    $default_ttl = 3600;
 
@@ -111,33 +110,5 @@ class CacheManager {
 			$ttl = $this->default_ttl;
 		}
 		set_transient( $key, wp_json_encode( $data ), $ttl );
-	}
-
-	/**
-	 * Get cached OpenAI models list.
-	 *
-	 * @return array{models: string[], updated_at: int}|null
-	 */
-	public function get_models_cache(): ?array {
-		$cache = get_option( $this->models_cache_option );
-		if ( is_array( $cache ) && ! empty( $cache['models'] ) && ! empty( $cache['updated_at'] ) ) {
-			return $cache;
-		}
-		return null;
-	}
-
-	/**
-	 * Store the OpenAI models list cache.
-	 *
-	 * @param string[] $models Model IDs.
-	 */
-	public function set_models_cache( array $models ): void {
-		update_option(
-			$this->models_cache_option,
-			array(
-				'models'     => $models,
-				'updated_at' => time(),
-			)
-		);
 	}
 }

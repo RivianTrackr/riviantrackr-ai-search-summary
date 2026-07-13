@@ -45,58 +45,6 @@
             }
         });
 
-        // --- Settings page: AI Provider switching ---
-        $('#riviantrackr-ai-provider').on('change', function() {
-            var provider = $(this).val();
-            // Show/hide API key fields based on provider
-            $('.riviantrackr-provider-field').hide();
-            $('.riviantrackr-provider-' + provider).show();
-        });
-
-        // --- Settings page: Test API Key (OpenAI) ---
-        $('#riviantrackr-test-key-btn').on('click', function() {
-            var btn = $(this);
-            var useConstant = adminData.useApiKeyConstant || false;
-            var apiKey = useConstant ? '__USE_CONSTANT__' : $('#riviantrackr-api-key').val().trim();
-            var resultDiv = $('#riviantrackr-test-result');
-
-            if (!useConstant && !apiKey) {
-                resultDiv.html('<div class="riviantrackr-test-result error"><p>Please enter an API key first.</p></div>');
-                return;
-            }
-
-            btn.prop('disabled', true).text('Testing...');
-            resultDiv.html('<div class="riviantrackr-test-result info"><p>Testing API key...</p></div>');
-
-            $.ajax({
-                url: ajaxurl,
-                type: 'POST',
-                data: {
-                    action: 'riviantrackr_test_api_key',
-                    api_key: apiKey,
-                    provider: 'openai',
-                    nonce: adminData.testKeyNonce || ''
-                },
-                success: function(response) {
-                    btn.prop('disabled', false).text('Test Connection');
-
-                    if (response.success) {
-                        var msg = '<strong>\u2713 ' + response.data.message + '</strong>';
-                        if (response.data.model_count) {
-                            msg += '<br>Available models: ' + response.data.model_count + ' (Chat models: ' + response.data.chat_models + ')';
-                        }
-                        resultDiv.html('<div class="riviantrackr-test-result success"><p>' + msg + '</p></div>');
-                    } else {
-                        resultDiv.html('<div class="riviantrackr-test-result error"><p><strong>\u2717 Test failed:</strong> ' + response.data.message + '</p></div>');
-                    }
-                },
-                error: function() {
-                    btn.prop('disabled', false).text('Test Connection');
-                    resultDiv.html('<div class="riviantrackr-test-result error"><p>Request failed. Please try again.</p></div>');
-                }
-            });
-        });
-
         // --- Settings page: Test API Key (Anthropic) ---
         $('#riviantrackr-test-anthropic-key-btn').on('click', function() {
             var btn = $(this);
@@ -118,7 +66,6 @@
                 data: {
                     action: 'riviantrackr_test_api_key',
                     api_key: apiKey,
-                    provider: 'anthropic',
                     nonce: adminData.testKeyNonce || ''
                 },
                 success: function(response) {

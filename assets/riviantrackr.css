@@ -66,7 +66,7 @@
   margin-bottom:0;
 }
 
-.riviantrackr-openai-badge {
+.riviantrackr-ai-badge {
   display:inline-flex;
   align-items:center;
   gap:0.35rem;
@@ -83,7 +83,7 @@
   font-family: var(--rtg-font-primary);
 }
 
-.riviantrackr-openai-mark {
+.riviantrackr-ai-mark {
   width:10px;
   height:10px;
   border-radius:999px;
@@ -92,7 +92,7 @@
   flex-shrink:0;
 }
 
-.riviantrackr-openai-mark::after {
+.riviantrackr-ai-mark::after {
   content:'';
   position:absolute;
   inset:2px;
@@ -100,7 +100,7 @@
   background:linear-gradient(135deg, #fba919, #d2de24, #86c440, #5ec095, #34c5ec, #2b96d2, #3571b8, #534da0, #d11d55, #ef3d6c, #ed1a36, #ee383a);
 }
 
-.riviantrackr-openai-text {
+.riviantrackr-ai-text {
   opacity:0.9;
 }
 
@@ -184,7 +184,7 @@
     font-size:1rem;
   }
 
-  .riviantrackr-openai-badge {
+  .riviantrackr-ai-badge {
     margin-top:0.15rem;
   }
 
