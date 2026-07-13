@@ -4,7 +4,7 @@ Tags: search, ai, anthropic, claude, summary
 Requires at least: 6.9
 Tested up to: 7.0
 Requires PHP: 8.4
-Stable tag: 2.0.0
+Stable tag: 2.0.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -162,6 +162,10 @@ The plugin is designed with privacy in mind:
 6. WordPress dashboard widget with quick stats
 
 == Changelog ==
+
+= 2.0.1 =
+* Fixed: All summary requests failed with HTTP 400 on Claude 4.6+ models (Sonnet 5, Sonnet 4.6, Opus 4.6/4.7/4.8). The assistant-prefill technique introduced in 2.0.0 is not supported on these models and has been removed; JSON output is enforced via the system prompt with brace-extraction fallback as before.
+* Changed: The analytics log now records the specific API failure (HTTP 400, rate limit, auth, overload) instead of a generic "AI service encountered an error" message.
 
 = 2.0.0 =
 * Removed: OpenAI support. The plugin is now Anthropic Claude only — the provider selector, OpenAI API key field, OpenAI model list, and reasoning-model setting are gone. Existing settings migrate automatically; a saved OpenAI model selection is reset so a Claude model can be chosen.

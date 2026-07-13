@@ -101,6 +101,10 @@ class ApiHandler {
 
 		$configured_tokens = isset( $options['max_tokens'] ) ? (int) $options['max_tokens'] : RIVIANTRACKR_MAX_TOKENS;
 
+		// Note: no assistant-turn prefill here — Claude 4.6+ models (Sonnet 5,
+		// Opus 4.6/4.7/4.8) reject last-turn prefills with a 400. JSON output
+		// is requested via the system prompt; parse_ai_content() handles any
+		// markdown fences or preamble via brace extraction.
 		$body = array(
 			'model'      => $model,
 			'max_tokens' => $configured_tokens,
@@ -109,13 +113,6 @@ class ApiHandler {
 				array(
 					'role'    => 'user',
 					'content' => $user_message,
-				),
-				// Prefill the assistant turn with an opening brace so the model
-				// continues with pure JSON (no prose preamble or markdown fences).
-				// normalize_anthropic_response() prepends the brace back.
-				array(
-					'role'    => 'assistant',
-					'content' => '{',
 				),
 			),
 		);
@@ -203,13 +200,6 @@ class ApiHandler {
 					$content_text .= $block['text'];
 				}
 			}
-		}
-
-		// call_anthropic() prefills the assistant turn with '{' — the API
-		// response continues after it, so restore the brace unless the model
-		// somehow returned a full JSON object anyway.
-		if ( $content_text !== '' && $content_text[0] !== '{' ) {
-			$content_text = '{' . $content_text;
 		}
 
 		$stop_reason   = isset( $api_data['stop_reason'] ) ? $api_data['stop_reason'] : 'end_turn';
@@ -342,7 +332,7 @@ class ApiHandler {
 		if ( $code === 400 ) {
 			return array(
 				'success'   => false,
-				'error'     => 'The request could not be processed. Please try a different search.',
+				'error'     => $provider . ' rejected the request (HTTP 400). Check the selected model and plugin settings.',
 				'retryable' => false,
 			);
 		}
