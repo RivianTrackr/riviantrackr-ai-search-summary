@@ -5,6 +5,14 @@ All notable changes to RivianTrackr AI Search Summary will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2026-07-13
+
+### Fixed
+- **Every summary request failed with HTTP 400 on Claude 4.6+ models.** The assistant-turn `{` prefill introduced in 2.0.0 is rejected by Sonnet 5, Sonnet 4.6, and Opus 4.6/4.7/4.8 — last-turn prefills return a 400 on those models, so all generations failed within milliseconds. The prefill (and its brace-restore in response normalization) is removed; JSON output is requested via the system prompt and recovered through the existing brace-extraction fallback, as in pre-2.0 releases.
+
+### Changed
+- **API errors now surface their real cause in the analytics log.** `get_ai_data_for_search()` previously collapsed every API failure to "The AI service encountered an error." — which hid this bug. The ApiHandler's user-safe error messages (HTTP 400 / rate limit / auth / overload) now pass through, and the 400 message names the provider and points at model/settings.
+
 ## [2.0.0] - 2026-07-13
 
 ### Removed

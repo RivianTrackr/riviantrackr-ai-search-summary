@@ -6,7 +6,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Plugin Name: AI Search Summary
  * Description: Add AI-powered summaries to WordPress search results using Anthropic Claude. Non-blocking, with analytics, cache control, and collapsible sources.
- * Version: 2.0.0
+ * Version: 2.0.1
  * Author: RivianTrackr
  * Author URI: https://github.com/RivianTrackr/
  * License: GPL v2 or later
@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Domain Path: /languages
  */
 
-define( 'RIVIANTRACKR_VERSION', '2.0.0' );
+define( 'RIVIANTRACKR_VERSION', '2.0.1' );
 define( 'RIVIANTRACKR_ASSET_SUFFIX', defined( 'SCRIPT_DEBUG' ) && SCRIPT_DEBUG ? '' : '.min' );
 
 // Load the namespaced class autoloader.
@@ -4573,7 +4573,10 @@ class RivianTrackr_AI_Search_Summary {
                 // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
                 error_log( '[RivianTrackr AI Search Summary] API error: ' . $api_response['error'] );
             }
-            $ai_error = 'The AI service encountered an error. Please try again later.';
+            // ApiHandler error messages are user-safe; passing them through
+            // (instead of one generic string) makes the analytics log show
+            // the actual failure class (HTTP 400 vs rate limit vs auth).
+            $ai_error = $api_response['error'];
             return null;
         }
 

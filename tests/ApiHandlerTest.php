@@ -100,25 +100,25 @@ class ApiHandlerTest extends TestCase {
 
 	// --- Anthropic Response Normalization ---
 
-	public function test_normalize_restores_prefilled_brace(): void {
-		// The request prefills the assistant turn with '{', so the API
-		// response text continues without it.
+	public function test_normalize_passes_content_through_unmodified(): void {
+		// No assistant prefill is sent (rejected with a 400 on Claude 4.6+
+		// models), so the response text must pass through untouched.
 		$normalized = $this->normalize( array(
 			'content'     => array(
-				array( 'type' => 'text', 'text' => '"answer_html":"<p>Hi</p>","results":[]}' ),
+				array( 'type' => 'text', 'text' => '{"answer_html":"<p>Hi</p>","results":[]}' ),
 			),
 			'stop_reason' => 'end_turn',
 		) );
 
 		$content = $normalized['choices'][0]['message']['content'];
-		$this->assertSame( '{', $content[0] );
-		$this->assertIsArray( json_decode( $content, true ) );
+		$this->assertSame( '{"answer_html":"<p>Hi</p>","results":[]}', $content );
 	}
 
-	public function test_normalize_does_not_double_brace_full_json(): void {
+	public function test_normalize_concatenates_text_blocks(): void {
 		$normalized = $this->normalize( array(
 			'content'     => array(
-				array( 'type' => 'text', 'text' => '{"answer_html":"<p>Hi</p>","results":[]}' ),
+				array( 'type' => 'text', 'text' => '{"answer_html":' ),
+				array( 'type' => 'text', 'text' => '"<p>Hi</p>","results":[]}' ),
 			),
 			'stop_reason' => 'end_turn',
 		) );
@@ -130,7 +130,7 @@ class ApiHandlerTest extends TestCase {
 	public function test_normalize_maps_max_tokens_to_length(): void {
 		$normalized = $this->normalize( array(
 			'content'     => array(
-				array( 'type' => 'text', 'text' => '"answer_html":"<p>cut off' ),
+				array( 'type' => 'text', 'text' => '{"answer_html":"<p>cut off' ),
 			),
 			'stop_reason' => 'max_tokens',
 		) );
