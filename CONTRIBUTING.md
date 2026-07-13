@@ -47,7 +47,7 @@ This project adheres to a code of conduct. By participating, you are expected to
 - WordPress 6.9 or higher
 - PHP 8.4 or higher
 - MySQL 5.6 or higher
-- OpenAI or Anthropic API account (for testing AI features)
+- Anthropic API account (for testing AI features)
 - Local WordPress development environment (Local by Flywheel, MAMP, or similar)
 
 ### Local Installation
@@ -65,7 +65,7 @@ This project adheres to a code of conduct. By participating, you are expected to
 3. Activate the plugin in WordPress admin
 
 4. Configure settings:
-   - Select an AI provider (OpenAI or Anthropic) and add the corresponding API key (use a test key with rate limits)
+   - Add your Anthropic API key (use a test key with rate limits)
    - Enable AI search
    - Adjust settings as needed
 
@@ -156,7 +156,7 @@ When testing AI functionality:
 - Very long search queries
 - Special characters in searches
 - No search results found
-- AI provider API errors (simulate with invalid OpenAI or Anthropic key)
+- AI provider API errors (simulate with invalid Anthropic key)
 - Network timeouts
 - Database errors
 

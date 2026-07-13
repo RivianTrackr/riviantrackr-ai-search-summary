@@ -7,8 +7,8 @@ use RivianTrackr\AISearchSummary\ApiHandler;
 /**
  * Tests for the ApiHandler class.
  *
- * Covers reasoning model detection, prompt building, post formatting,
- * and AI content parsing.
+ * Covers prompt building, post formatting, Anthropic response
+ * normalization, and AI content parsing.
  */
 class ApiHandlerTest extends TestCase {
 
@@ -18,36 +18,12 @@ class ApiHandlerTest extends TestCase {
 		$this->handler = new ApiHandler();
 	}
 
-	// --- Reasoning Model Detection ---
-
-	public function test_o1_is_reasoning_model(): void {
-		$this->assertTrue( ApiHandler::is_reasoning_model( 'o1' ) );
-		$this->assertTrue( ApiHandler::is_reasoning_model( 'o1-preview' ) );
-		$this->assertTrue( ApiHandler::is_reasoning_model( 'o1-mini' ) );
-	}
-
-	public function test_o3_is_reasoning_model(): void {
-		$this->assertTrue( ApiHandler::is_reasoning_model( 'o3' ) );
-		$this->assertTrue( ApiHandler::is_reasoning_model( 'o3-mini' ) );
-	}
-
-	public function test_o4_is_reasoning_model(): void {
-		$this->assertTrue( ApiHandler::is_reasoning_model( 'o4-mini' ) );
-	}
-
-	public function test_gpt4o_is_not_reasoning_model(): void {
-		$this->assertFalse( ApiHandler::is_reasoning_model( 'gpt-4o' ) );
-		$this->assertFalse( ApiHandler::is_reasoning_model( 'gpt-4o-mini' ) );
-	}
-
-	public function test_gpt4_is_not_reasoning_model(): void {
-		$this->assertFalse( ApiHandler::is_reasoning_model( 'gpt-4' ) );
-		$this->assertFalse( ApiHandler::is_reasoning_model( 'gpt-4-turbo' ) );
-	}
-
-	public function test_claude_is_not_reasoning_model(): void {
-		$this->assertFalse( ApiHandler::is_reasoning_model( 'claude-sonnet-4-6' ) );
-		$this->assertFalse( ApiHandler::is_reasoning_model( 'claude-opus-4-6' ) );
+	/**
+	 * Invoke the private normalize_anthropic_response() method.
+	 */
+	private function normalize( array $api_data ): array {
+		$method = new ReflectionMethod( ApiHandler::class, 'normalize_anthropic_response' );
+		return $method->invoke( $this->handler, $api_data );
 	}
 
 	// --- System Prompt Building ---
@@ -122,9 +98,58 @@ class ApiHandlerTest extends TestCase {
 		$this->assertSame( 2, substr_count( $output, '-----' ) );
 	}
 
+	// --- Anthropic Response Normalization ---
+
+	public function test_normalize_restores_prefilled_brace(): void {
+		// The request prefills the assistant turn with '{', so the API
+		// response text continues without it.
+		$normalized = $this->normalize( array(
+			'content'     => array(
+				array( 'type' => 'text', 'text' => '"answer_html":"<p>Hi</p>","results":[]}' ),
+			),
+			'stop_reason' => 'end_turn',
+		) );
+
+		$content = $normalized['choices'][0]['message']['content'];
+		$this->assertSame( '{', $content[0] );
+		$this->assertIsArray( json_decode( $content, true ) );
+	}
+
+	public function test_normalize_does_not_double_brace_full_json(): void {
+		$normalized = $this->normalize( array(
+			'content'     => array(
+				array( 'type' => 'text', 'text' => '{"answer_html":"<p>Hi</p>","results":[]}' ),
+			),
+			'stop_reason' => 'end_turn',
+		) );
+
+		$content = $normalized['choices'][0]['message']['content'];
+		$this->assertIsArray( json_decode( $content, true ) );
+	}
+
+	public function test_normalize_maps_max_tokens_to_length(): void {
+		$normalized = $this->normalize( array(
+			'content'     => array(
+				array( 'type' => 'text', 'text' => '"answer_html":"<p>cut off' ),
+			),
+			'stop_reason' => 'max_tokens',
+		) );
+
+		$this->assertSame( 'length', $normalized['choices'][0]['finish_reason'] );
+	}
+
+	public function test_normalize_leaves_empty_content_empty(): void {
+		$normalized = $this->normalize( array(
+			'content'     => array(),
+			'stop_reason' => 'end_turn',
+		) );
+
+		$this->assertSame( '', $normalized['choices'][0]['message']['content'] );
+	}
+
 	// --- AI Content Parsing ---
 
-	public function test_parse_valid_openai_response(): void {
+	public function test_parse_valid_response(): void {
 		$response = array(
 			'choices' => array(
 				array(
@@ -354,5 +379,28 @@ class ApiHandlerTest extends TestCase {
 
 		$this->assertNull( $result );
 		$this->assertStringContainsString( 'parse', $error );
+	}
+
+	public function test_parse_truncated_json_reports_truncation(): void {
+		// A response cut off mid-JSON at the max_tokens limit must surface
+		// the truncation instead of a generic parse failure.
+		$response = array(
+			'choices' => array(
+				array(
+					'message' => array(
+						'content' => '{"answer_html":"<p>This answer was cut off mid-sent',
+						'refusal' => null,
+					),
+					'finish_reason' => 'length',
+				),
+			),
+		);
+
+		$error  = '';
+		$result = $this->handler->parse_ai_content( $response, $error );
+
+		$this->assertNull( $result );
+		$this->assertStringContainsString( 'truncated', $error );
+		$this->assertStringContainsString( 'Max Response Tokens', $error );
 	}
 }
