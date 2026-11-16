@@ -6,7 +6,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Plugin Name: AI Search Summary
  * Description: Add AI-powered summaries to WordPress search results using Anthropic Claude. Non-blocking, with analytics, cache control, and collapsible sources.
- * Version: 2.2.0
+ * Version: 2.3.0
  * Author: RivianTrackr
  * Author URI: https://github.com/RivianTrackr/
  * License: GPL v2 or later
@@ -16,7 +16,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Text Domain: riviantrackr-ai-search-summary
  */
 
-define( 'RIVIANTRACKR_VERSION', '2.2.0' );
+define( 'RIVIANTRACKR_VERSION', '2.3.0' );
 define( 'RIVIANTRACKR_ASSET_SUFFIX', defined( 'SCRIPT_DEBUG' ) && SCRIPT_DEBUG ? '' : '.min' );
 
 // Load the namespaced class autoloader.
@@ -946,7 +946,35 @@ class RivianTrackr_AI_Search_Summary {
     );
 }";
 
-        return trim( $css );
+        return $this->scope_to_site_dark( trim( $css ) );
+    }
+
+    /**
+     * Keeps the configured colors off the site's light mode.
+     *
+     * RivianTrackr's color modes set data-rt-theme="light" on <html>, and the
+     * stylesheet's light tokens take over there. Each selector is prefixed with
+     * a zero-specificity :where(), so on every other page the cascade is
+     * exactly what it was.
+     *
+     * @param string $css Generated color CSS.
+     * @return string
+     */
+    private function scope_to_site_dark( string $css ): string {
+        return (string) preg_replace_callback(
+            '/(^|\})\s*([^{}]+)\{/',
+            function ( $m ) {
+                $selectors = array_map( 'trim', explode( ',', $m[2] ) );
+                $selectors = array_map(
+                    function ( $sel ) {
+                        return ':where(html:not([data-rt-theme="light"])) ' . $sel;
+                    },
+                    $selectors
+                );
+                return $m[1] . "\n" . implode( ",\n", $selectors ) . ' {';
+            },
+            $css
+        );
     }
 
     /**
