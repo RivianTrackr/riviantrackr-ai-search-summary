@@ -1,13 +1,32 @@
 ## Design Language
 
-A hand-crafted CSS design system with two theme modes (dark consumer-facing,
-light admin/internal). Pure CSS custom properties — no Tailwind, no preprocessor,
+A hand-crafted CSS design system. Consumer-facing pages have two color modes,
+light (default, "paper and ink") and dark ("ink & brass"), following the device
+setting with a reader override. Admin/internal screens use a separate light
+admin palette. Pure CSS custom properties — no Tailwind, no preprocessor,
 no component library. Icons via Font Awesome 6. Modern CSS features assumed
 (`color-mix()`, `backdrop-filter`, `:has()`, `dvh` units, `env()` safe-area insets).
 
 ### Color Primitives
 
-**Dark theme (consumer-facing)**
+**Site light mode (consumer-facing, default since November 2026)** — riviantrackr.com sets `data-rt-theme="light|dark"` on `<html>` before paint (mu-plugin `rt-color-modes.php`, choice in localStorage `rtTheme`, follows the device otherwise; readers switch under Appearance in the account menu). This plugin's light rules live under `html[data-rt-theme="light"]` and gold used as text goes through an `--*-accent-text` token. Every new front-end component must work in both modes, built on tokens, with contrast checked in both.
+
+| Role             | Value     | Notes                          |
+|------------------|-----------|--------------------------------|
+| Page             | `#f6f5f2` | Page background                |
+| Card             | `#ffffff` | Card surfaces                  |
+| Raised           | `#eeece7` | Hover rows, inputs, insets     |
+| Line             | `#e3e0d9` | Borders, dividers (hover `#cdc9c1`) |
+| Heading          | `#121316` | Headings                       |
+| Text primary     | `#1a1c20` | Body copy                      |
+| Text secondary   | `#53565c` | Descriptions, metadata         |
+| Text muted       | `#686b71` | Meta, captions                 |
+| Accent fill      | `#fba919` | Buttons, tags (text on it `#15130e`) |
+| Accent as text   | `#8a5800` | Brass; hover `#6f4700`. Never `#fba919` text on light (1.9:1) |
+| Error / success / info text | `#c4281c` / `#157f3c` / `#1e5fb8` | Status text |
+| Star empty       | `#d9d5cd` | Unfilled rating slots          |
+
+**Dark theme (consumer-facing, option)**
 
 | Role            | Value     | Notes                          |
 |-----------------|-----------|--------------------------------|
@@ -24,7 +43,7 @@ no component library. Icons via Font Awesome 6. Modern CSS features assumed
 | Placeholder     | `#9ca3af` | Input placeholder text         |
 | Overlay dark    | `#0f172a` | Text-on-accent, dark contrast  |
 
-**Light theme (admin/internal)**
+**Light theme (admin/internal only)** — not for front-end pages.
 
 | Role             | Value     | Notes                          |
 |------------------|-----------|--------------------------------|
@@ -251,7 +270,7 @@ Track: 6px height, full-round, gradient fill. Hover: `scale(1.15)` + accent ring
 
 - `color-mix(in srgb, [color] N%, transparent)` for tinted backgrounds & borders
 - `color-mix(in srgb, [accent] N%, [deep-bg])` for subtle accent surfaces
-- Uppercase labels: 11px, weight 600–700, `letter-spacing: 0.3–0.8px`
+- Labels in sentence case on front-end pages ("Trending", not "TRENDING"), no decorative icons on headings. Uppercase 11px tracked labels only for admin screens and table headers
 - Monospace values: use mono stack for numeric data cells
 - Icons: Font Awesome 6 solid (`fa-solid` prefix)
 - No framework dependencies — all components are vanilla CSS + semantic HTML
