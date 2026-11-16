@@ -5,6 +5,14 @@ All notable changes to RivianTrackr AI Search Summary will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] - 2026-11-16
+
+### Added
+- **Site light mode.** When RivianTrackr's color modes set `data-rt-theme="light"` on `<html>`, the summary card, sources and states switch to light tokens. Gold used as text goes through new `--rtg-accent-text` tokens (brass `#8a5800` in light) while buttons keep the gold fill.
+
+### Changed
+- **Configured colors stay out of light mode.** The color CSS built from the settings is scoped with a zero-specificity `:where(html:not([data-rt-theme="light"]))`, so it behaves exactly as before everywhere else.
+
 ## [2.2.0] - 2026-09-11
 
 ### Changed

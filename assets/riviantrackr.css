@@ -11,12 +11,28 @@
   --rtg-border: #3a3e45;
   --rtg-info: #60a5fa;
   --rtg-error: #ef4444;
+  --rtg-accent-text: var(--rtg-accent);
+  --rtg-accent-text-hover: var(--rtg-accent-hover);
   --rtg-radius-callout: 10px;
   --rtg-radius-xs: 4px;
   --rtg-radius-card: 12px;
   --rtg-radius-pill: 20px;
   --rtg-radius-full: 9999px;
   --rtg-font-primary: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+}
+
+/* Site light mode: RivianTrackr's color modes set data-rt-theme="light" on <html>.
+   Gold stays the fill for buttons, and brass carries it wherever it is text. */
+html[data-rt-theme="light"] {
+  --rtg-bg-card: #ffffff;
+  --rtg-bg-deep: #eeece7;
+  --rtg-text-primary: #1a1c20;
+  --rtg-text-muted: #686b71;
+  --rtg-border: #e3e0d9;
+  --rtg-info: #1e5fb8;
+  --rtg-error: #c4281c;
+  --rtg-accent-text: #8a5800;
+  --rtg-accent-text-hover: #6f4700;
 }
 
 /* Summary card layout (formerly inline styles on the widget markup; kept in
@@ -59,7 +75,7 @@
   font-weight: 700;
   letter-spacing: 0.6px;
   text-transform: uppercase;
-  color: var(--rtg-accent);
+  color: var(--rtg-accent-text);
 }
 
 .riviantrackr-eyebrow-icon {
@@ -111,7 +127,7 @@
 }
 
 .riviantrackr-answer li::marker {
-  color: var(--rtg-accent);
+  color: var(--rtg-accent-text);
 }
 
 .riviantrackr-answer h3,
@@ -127,7 +143,7 @@
 }
 
 .riviantrackr-answer a {
-  color: var(--rtg-accent);
+  color: var(--rtg-accent-text);
   text-decoration: underline;
   text-underline-offset: 3px;
   text-decoration-thickness: 1px;
@@ -189,7 +205,7 @@
 }
 
 .riviantrackr-callout--warning .riviantrackr-callout-icon {
-  color: var(--rtg-accent);
+  color: var(--rtg-accent-text);
 }
 
 .riviantrackr-callout--error {
@@ -350,7 +366,7 @@
 }
 
 .riviantrackr-sources-toggle:hover {
-  color: var(--rtg-accent);
+  color: var(--rtg-accent-text);
 }
 
 .riviantrackr-sources-toggle:focus-visible {
@@ -375,7 +391,7 @@
   border-radius: var(--rtg-radius-pill);
   border: 1px solid color-mix(in srgb, var(--rtg-accent) 35%, transparent);
   background: color-mix(in srgb, var(--rtg-accent) 12%, var(--rtg-bg-deep));
-  color: var(--rtg-accent);
+  color: var(--rtg-accent-text);
   font-size: 11px;
   font-weight: 700;
   line-height: 1.2;
@@ -427,7 +443,7 @@
 }
 
 .riviantrackr-source-title {
-  color: var(--rtg-accent);
+  color: var(--rtg-accent-text);
   font-size: 14px;
   font-weight: 600;
   line-height: 1.35;
@@ -589,7 +605,7 @@ a.riviantrackr-source-title:focus-visible {
 .riviantrackr-feedback-btn:hover:not(:disabled) {
   border-color: var(--rtg-accent);
   background-color: color-mix(in srgb, var(--rtg-accent) 12%, var(--rtg-bg-deep));
-  color: var(--rtg-accent);
+  color: var(--rtg-accent-text);
 }
 
 .riviantrackr-feedback-btn:active:not(:disabled) {
@@ -619,7 +635,7 @@ a.riviantrackr-source-title:focus-visible {
   margin-top: 0.5rem;
   font-size: 13px;
   font-weight: 500;
-  color: var(--rtg-accent);
+  color: var(--rtg-accent-text);
 }
 
 /* Reduced motion */
