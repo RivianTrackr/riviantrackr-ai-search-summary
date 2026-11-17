@@ -6,7 +6,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Plugin Name: AI Search Summary
  * Description: Add AI-powered summaries to WordPress search results using Anthropic Claude. Non-blocking, with analytics, cache control, and collapsible sources.
- * Version: 2.3.0
+ * Version: 2.3.1
  * Author: RivianTrackr
  * Author URI: https://github.com/RivianTrackr/
  * License: GPL v2 or later
@@ -16,7 +16,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Text Domain: riviantrackr-ai-search-summary
  */
 
-define( 'RIVIANTRACKR_VERSION', '2.3.0' );
+define( 'RIVIANTRACKR_VERSION', '2.3.1' );
 define( 'RIVIANTRACKR_ASSET_SUFFIX', defined( 'SCRIPT_DEBUG' ) && SCRIPT_DEBUG ? '' : '.min' );
 
 // Load the namespaced class autoloader.
@@ -3776,7 +3776,6 @@ class RivianTrackr_AI_Search_Summary {
                 <div class="riviantrackr-summary-header">
                     <div class="riviantrackr-summary-heading">
                         <span class="riviantrackr-eyebrow">
-                            <svg class="riviantrackr-eyebrow-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.8 5.6L19.5 9l-5.7 1.4L12 16l-1.8-5.6L4.5 9l5.7-1.4z"/><path d="M19 15l.9 2.6 2.6.9-2.6.9L19 22l-.9-2.6-2.6-.9 2.6-.9z"/></svg>
                             AI summary
                         </span>
                         <h2>
@@ -3785,7 +3784,6 @@ class RivianTrackr_AI_Search_Summary {
                     </div>
                     <?php if ( $show_badge ) : ?>
                     <span class="riviantrackr-ai-badge" aria-label="Powered by Claude">
-                        <span class="riviantrackr-ai-mark" aria-hidden="true"></span>
                         <span class="riviantrackr-ai-text">Powered by Claude</span>
                     </span>
                     <?php endif; ?>
